@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "model": {
+    "provider": "google",
+    "name": "gemini-3.8-flash",
+    "baseURL": "https://api.flashway.ai/v1",
+    "apiKey": "${GOOGLE_GENERATIVE_AI_API_KEY}"
+  },
+  "rag": {
+    "enabled": true,
+    "docsDir": "docs",
+    "provider": "dashscope",
+    "model": "qwen3.7-text-embedding",
+    "apiKey": "${DASHSCOPE_API_KEY}",
+    "dimensions": 1024
+  },
+  "plugins": [
+    {
+      "name": "supabase",
+      "enabled": false,
+      "config": {}
+    }
+  ],
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "appId": "${FEISHU_APP_ID}",
+      "appSecret": "${FEISHU_APP_SECRET}",
+      "port": 3000
+    }
+  },
+  "agents": {
+    "maxSpawnDepth": 1,
+    "maxConcurrent": 3,
+    "defaultTimeout": 60000
+  },
+  "security": {
+    "defaultRole": "developer",
+    "auditLog": true,
+    "bashTimestamp": true
+  },
+  "memory": {
+    "dataDir": "."
+  },
+  "cron": {
+    "enabled": true,
+    "dataDir": "."
+  },
+  "session": {
+    "id": "default"
+  },
+  "usage": {
+    "trackingFile": ".usage/today.jsonl"
+  }
+}

@@ -1,0 +1,43 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 编译与构建产物
+dist/
+build/
+*.tsbuildinfo
+
+# 敏感配置与密钥（严防泄漏）
+.env
+.env.*
+!.env.example
+
+# 本地运行时数据与状态目录
+.cron/
+.memory/
+.sessions/
+.usage/
+.skills/
+knowledge.db
+knowledge.db-journal
+
+# 日志与测试产物
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+edit_tool_test.txt
+
+# 系统与编辑器文件
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
