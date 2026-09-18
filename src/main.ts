@@ -11,7 +11,7 @@ import { createToolSearchTool } from './tools/tool-search.js';
 import { createMemoryTool } from './tools/memory-tools.js';
 import { createRagTools } from './tools/rag-tools.js';
 import { MCPClient } from './tools/mcp-client.js';
-import { agentLoop } from './agent/loop.js';
+import { executeAgent as agentLoop } from './runtime/execution.js';
 import { SessionStore } from './session/store.js';
 import {
   PromptBuilder, coreRules, toolGuide, deferredTools, sessionContext,
@@ -70,7 +70,7 @@ import type { SpawnContext } from './agents/spawn.js';
  */
 
 // ── 1. 加载配置与初始化大语言模型 (Model Factory) ────────────────
-const config = loadConfig();
+const config: SuperAgentConfig = process.env.CHEESE_RUNTIME_CONFIG ? JSON.parse(process.env.CHEESE_RUNTIME_CONFIG) : loadConfig();
 const model = getModel(config.model);
 
 // ── 2. 工具注册中心 (Tool Registry) ──────────────────────────────
@@ -384,4 +384,10 @@ export async function startAgent() {
 
   // 进入交互循环
   ask();
+}
+
+export async function runTask(messages: ModelMessage[]) {
+  await connectMCP();
+  await agentLoop(model, registry, messages, builder.build(makePromptCtx()));
+  await registry.closeAllMCP();
 }

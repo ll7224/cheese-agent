@@ -1,7 +1,7 @@
 import type { ModelMessage } from 'ai';
 import type { ChannelDefinition, IncomingMessage, OutgoingMessage } from './types.js';
 import type { ToolRegistry } from '../tools/registry.js';
-import { agentLoop } from '../agent/loop.js';
+import { executeAgent as agentLoop } from '../runtime/execution.js';
 
 /**
  * 网关构造参数选项
