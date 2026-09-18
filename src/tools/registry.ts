@@ -121,6 +121,16 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
+  fork(excluded = new Set<string>(), allowed?: string[]): ToolRegistry {
+    const registry = new ToolRegistry();
+    registry.register(...this.getAll().filter(tool => !excluded.has(tool.name) && (!allowed || allowed.includes(tool.name))));
+    registry.activeProfile = this.activeProfile;
+    registry.currentRole = this.currentRole;
+    registry.discoveredTools = new Set(this.discoveredTools);
+    registry.hookPipeline = this.hookPipeline;
+    return registry;
+  }
+
   getActiveTools(): ToolDefinition[] {
     return this.getAll().filter(tool => {
       if (tool.profile && !tool.profile.includes(this.activeProfile)) {

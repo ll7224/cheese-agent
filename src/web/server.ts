@@ -48,7 +48,7 @@ export function createApp(runtime: Runtime) {
 }
 
 export function startWeb() {
-  const runtime = new Runtime(resolve(process.env.CHEESE_DATA_DIR || join(homedir(), '.cheese-agent')), undefined, { configDir: process.cwd(), maxConcurrent: Number(process.env.CHEESE_MAX_RUNS || 3) });
+  const runtime = new Runtime(resolve(process.env.CHEESE_DATA_DIR || join(homedir(), '.cheese-agent')), undefined, { configDir: process.cwd(), maxConcurrent: Number(process.env.CHEESE_MAX_RUNS || 3), maxChildren: Number(process.env.CHEESE_MAX_CHILDREN || 3) });
   runtime.addWorkspace(process.cwd());
   const port = Number(process.env.CHEESE_PORT || 3210);
   const server = serve({ fetch: createApp(runtime).fetch, hostname: '127.0.0.1', port }, info => console.log(`Cheese Agent → http://127.0.0.1:${info.port}`));

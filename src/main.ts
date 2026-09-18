@@ -389,6 +389,7 @@ export async function startAgent() {
 
 export async function runTask(messages: ModelMessage[], options: ExecutionOptions = {}) {
   await connectMCP();
+  registry.register(createSpawnTool(agentRegistry, () => ({ ...getSpawnCtx(), ...options })));
   await agentLoop(model, registry, messages, builder.build(makePromptCtx()), undefined, options);
   await registry.closeAllMCP();
 }

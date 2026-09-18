@@ -6,12 +6,13 @@ import { executeWorker } from './worker-client.js';
 import { captureConfig, resolveConfig, type ConfigSnapshot } from './config.js';
 import { EventEmitter } from 'node:events';
 import { redact, collectSecrets, type AgentEvent, type ExecutionEvent } from './events.js';
+import { Pool } from './pool.js';
 
 export interface Workspace { id: string; path: string; name: string }
 export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot }
 export interface Run { id: string; sessionId: string; key: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'stopping' | 'cancelled' | 'interrupted'; error?: string }
 interface State { workspaces: Workspace[]; sessions: Session[]; runs: Run[]; events: ExecutionEvent[] }
-export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; emit: (event: AgentEvent) => void }
+export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void> }
 export type Executor = (execution: Execution) => Promise<ModelMessage[]>;
 export class RuntimeError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -23,8 +24,10 @@ export class Runtime {
   private jobs = new Set<Promise<void>>();
   private bus = new EventEmitter();
   private storageError?: Error;
+  private children: Pool;
 
-  constructor(dataDir: string, private executor: Executor = executeWorker, private options: { configDir?: string; maxConcurrent?: number } = {}) {
+  constructor(dataDir: string, private executor: Executor = executeWorker, private options: { configDir?: string; maxConcurrent?: number; maxChildren?: number } = {}) {
+    this.children = new Pool(options.maxChildren ?? 3);
     if (!Number.isInteger(options.maxConcurrent ?? 3) || (options.maxConcurrent ?? 3) < 1) throw new RuntimeError('并发额度必须为正整数');
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     this.file = join(dataDir, 'state.json');
@@ -128,7 +131,7 @@ export class Runtime {
   }
 
   status() {
-    return { status: this.storageError ? 'storage-error' : 'ready', active: this.jobs.size, limit: this.options.maxConcurrent ?? 3, queued: this.state.runs.filter(run => run.status === 'queued').length };
+    return { status: this.storageError ? 'storage-error' : 'ready', active: this.jobs.size, limit: this.options.maxConcurrent ?? 3, queued: this.state.runs.filter(run => run.status === 'queued').length, children: { active: this.children.active, limit: this.children.limit } };
   }
 
   private pump() {
@@ -150,7 +153,7 @@ export class Runtime {
     try {
       const config = session.config ? resolveConfig(session.config) : undefined;
       secrets = collectSecrets(config);
-      session.messages = redact(await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, emit: event => this.emit(run, event, secrets) }), secrets);
+      session.messages = redact(await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, emit: event => this.emit(run, { ...event, ...(event.childRunId ? { rootRunId: run.id, parentRunId: run.id } : {}) }, secrets), acquireChild: () => this.children.acquire() }), secrets);
       run.status = 'completed';
     } catch (error) {
       run.status = 'failed';
