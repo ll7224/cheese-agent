@@ -24,7 +24,8 @@ export class Runtime {
   private bus = new EventEmitter();
   private storageError?: Error;
 
-  constructor(dataDir: string, private executor: Executor = executeWorker, private options: { configDir?: string } = {}) {
+  constructor(dataDir: string, private executor: Executor = executeWorker, private options: { configDir?: string; maxConcurrent?: number } = {}) {
+    if (!Number.isInteger(options.maxConcurrent ?? 3) || (options.maxConcurrent ?? 3) < 1) throw new RuntimeError('并发额度必须为正整数');
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     this.file = join(dataDir, 'state.json');
     this.state = existsSync(this.file) ? JSON.parse(readFileSync(this.file, 'utf8')) : { workspaces: [], sessions: [], runs: [], events: [] };
@@ -116,16 +117,32 @@ export class Runtime {
     if (this.state.runs.some(run => run.sessionId === sessionId && ['queued', 'running', 'stopping'].includes(run.status))) throw new RuntimeError('当前会话已有待完成任务', 409);
     const workspace = this.workspace(session.workspaceId);
     if (!this.available(workspace)) throw new RuntimeError('工作目录已不可用');
-    const run: Run = { id: randomUUID(), sessionId, key, status: 'running' };
+    const run: Run = { id: randomUUID(), sessionId, key, status: 'queued' };
     session.messages.push({ role: 'user', content: text });
     if (session.title === '新会话') session.title = text.slice(0, 50);
     session.updatedAt = new Date().toISOString();
     this.state.runs.push(run);
     this.emit(run, { type: 'status', status: run.status });
-    const job = this.execute(run, session, workspace);
-    this.jobs.add(job);
-    void job.finally(() => this.jobs.delete(job)).catch(() => {});
+    this.pump();
     return run;
+  }
+
+  status() {
+    return { status: this.storageError ? 'storage-error' : 'ready', active: this.jobs.size, limit: this.options.maxConcurrent ?? 3, queued: this.state.runs.filter(run => run.status === 'queued').length };
+  }
+
+  private pump() {
+    if (this.storageError) return;
+    while (this.jobs.size < (this.options.maxConcurrent ?? 3)) {
+      const run = this.state.runs.find(item => item.status === 'queued');
+      if (!run) break;
+      run.status = 'running';
+      this.emit(run, { type: 'status', status: run.status });
+      const session = this.session(run.sessionId);
+      const job = this.execute(run, session, this.workspace(session.workspaceId));
+      this.jobs.add(job);
+      void job.finally(() => { this.jobs.delete(job); this.pump(); }).catch(() => {});
+    }
   }
 
   private async execute(run: Run, session: Session, workspace: Workspace) {
@@ -143,5 +160,5 @@ export class Runtime {
     this.emit(run, { type: 'status', status: run.status, error: run.error });
   }
 
-  async idle() { await Promise.all(this.jobs); }
+  async idle() { while (this.jobs.size) await Promise.all(this.jobs); }
 }

@@ -16,7 +16,7 @@ export function createApp(runtime: Runtime) {
     await next();
   });
   app.onError((error, context) => context.json({ error: error.message }, error instanceof RuntimeError ? error.status as 400 : 500));
-  app.get('/api/v1/status', context => context.json({ status: 'ready' }));
+  app.get('/api/v1/status', context => context.json(runtime.status()));
   app.get('/api/v1/workspaces', context => context.json(runtime.listWorkspaces()));
   app.post('/api/v1/workspaces', async context => context.json(runtime.addWorkspace((await context.req.json()).path), 201));
   app.get('/api/v1/sessions', context => context.json(runtime.state.sessions.filter(session => session.workspaceId === context.req.query('workspaceId')).map(({ messages, ...session }) => session)));
@@ -48,7 +48,7 @@ export function createApp(runtime: Runtime) {
 }
 
 export function startWeb() {
-  const runtime = new Runtime(resolve(process.env.CHEESE_DATA_DIR || join(homedir(), '.cheese-agent')), undefined, { configDir: process.cwd() });
+  const runtime = new Runtime(resolve(process.env.CHEESE_DATA_DIR || join(homedir(), '.cheese-agent')), undefined, { configDir: process.cwd(), maxConcurrent: Number(process.env.CHEESE_MAX_RUNS || 3) });
   runtime.addWorkspace(process.cwd());
   const port = Number(process.env.CHEESE_PORT || 3210);
   const server = serve({ fetch: createApp(runtime).fetch, hostname: '127.0.0.1', port }, info => console.log(`Cheese Agent → http://127.0.0.1:${info.port}`));

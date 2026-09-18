@@ -69,10 +69,30 @@ test('execution events persist with ordered cursors and redact credential fields
     const run = runtime.submit(session.id, 'hello', 'events');
     await runtime.idle();
     const events = runtime.events(run.id, 0);
-    assert.deepEqual(events.map(event => event.sequence), [1, 2, 3, 4, 5]);
+    assert.deepEqual(events.map(event => event.sequence), [1, 2, 3, 4, 5, 6]);
     assert.equal(JSON.stringify(events).includes('do-not-store'), false);
-    assert.equal(runtime.events(run.id, 3).length, 2);
+    assert.equal(runtime.events(run.id, 3).length, 3);
     const restored = new Runtime(dir);
-    assert.equal(restored.events(run.id, 0).length, 5);
+    assert.equal(restored.events(run.id, 0).length, 6);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('four same-directory sessions run at most three tasks and advance FIFO without serializing the directory', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cheese-queue-'));
+  const releases: Array<() => void> = [];
+  try {
+    const runtime = new Runtime(dir, async ({ messages }) => { await new Promise<void>(resolve => releases.push(resolve)); return messages; });
+    const workspace = runtime.addWorkspace(dir);
+    const sessions = Array.from({ length: 4 }, () => runtime.createSession(workspace.id));
+    const runs = sessions.map((session, index) => runtime.submit(session.id, 'work', `key-${index}`));
+    assert.deepEqual(runs.map(run => run.status), ['running', 'running', 'running', 'queued']);
+    assert.equal(releases.length, 3);
+    assert.throws(() => runtime.submit(sessions[0].id, 'again', 'other'), /待完成/);
+    releases[0]();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(runs[3].status, 'running');
+    releases.slice(1).forEach(release => release());
+    await runtime.idle();
+    assert.equal(runtime.status().active, 0);
+  } finally { releases.forEach(release => release()); rmSync(dir, { recursive: true, force: true }); }
 });

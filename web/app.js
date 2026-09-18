@@ -58,6 +58,8 @@ async function refresh() {
   }
   element('workspaces').replaceChildren(...workspaces.map(workspace => new Option(`${workspace.path}${workspace.available ? '' : ' · 不可用'}`, workspace.id, false, workspace.id === workspaceId)));
   const sessions = workspaceId ? await api(`/sessions?workspaceId=${workspaceId}`) : [];
+  const status = await api('/status');
+  element('connection').title = `运行 ${status.active}/${status.limit} · 排队 ${status.queued}；同目录会话共享文件，可能覆盖彼此修改`;
   element('sessions').replaceChildren(...sessions.map(session => {
     const button = document.createElement('button');
     button.textContent = session.title;
