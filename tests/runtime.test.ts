@@ -124,3 +124,29 @@ test('stopping one task cancels its permit waiters without stopping other sessio
     assert.equal(runtime.status().active, 0);
   } finally { releases.forEach(release => release()); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('restart interrupts queued and running work and preserves partial output without replay', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cheese-recovery-'));
+  let finish: () => void = () => {};
+  try {
+    const original = new Runtime(join(dir, 'original'), async ({ messages, emit }) => {
+      emit({ type: 'text', text: '已完成的部分', step: 1, attempt: 1 });
+      await new Promise<void>(resolve => { finish = resolve; });
+      return messages;
+    }, { maxConcurrent: 1 });
+    const workspace = original.addWorkspace(dir);
+    const first = original.createSession(workspace.id);
+    const second = original.createSession(workspace.id);
+    original.submit(first.id, 'task', 'one'); original.submit(second.id, 'task', 'two');
+    const restoredDir = join(dir, 'restored'); mkdirSync(restoredDir);
+    writeFileSync(join(restoredDir, 'state.json'), readFileSync(join(dir, 'original/state.json')));
+    const restored = new Runtime(restoredDir, async ({ messages }) => [...messages, { role: 'assistant', content: 'continued' }]);
+    assert.deepEqual(restored.state.runs.map(run => run.status), ['interrupted', 'interrupted']);
+    assert.match(JSON.stringify(restored.session(first.id).messages), /已完成的部分/);
+    assert.equal(restored.status().active, 0);
+    restored.submit(first.id, 'continue', 'three');
+    await restored.idle();
+    assert.deepEqual(restored.state.runs.map(run => run.status), ['interrupted', 'interrupted', 'completed']);
+    original.stop(original.state.runs[1].id); finish(); await original.idle();
+  } finally { finish(); rmSync(dir, { recursive: true, force: true }); }
+});

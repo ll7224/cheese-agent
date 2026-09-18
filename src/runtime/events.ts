@@ -17,3 +17,9 @@ export function collectSecrets(value: any): string[] {
   if (!value || typeof value !== 'object') return [];
   return Object.entries(value).flatMap(([key, entry]) => /apiKey|appSecret|password|token|secret/i.test(key) && typeof entry === 'string' ? [entry] : collectSecrets(entry));
 }
+
+export function partialText(events: AgentEvent[]): string {
+  const attempts = new Map<unknown, number>();
+  for (const event of events) if (!event.childRunId && (event.type === 'text' || event.type === 'retry')) attempts.set(event.step, Math.max(attempts.get(event.step) || 0, Number(event.attempt || 1) + (event.type === 'retry' ? 1 : 0)));
+  return events.filter(event => !event.childRunId && event.type === 'text' && Number(event.attempt || 1) === attempts.get(event.step)).map(event => String(event.text || '')).join('');
+}

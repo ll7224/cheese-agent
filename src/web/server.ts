@@ -19,7 +19,11 @@ export function createApp(runtime: Runtime) {
   app.get('/api/v1/status', context => context.json(runtime.status()));
   app.get('/api/v1/workspaces', context => context.json(runtime.listWorkspaces()));
   app.post('/api/v1/workspaces', async context => context.json(runtime.addWorkspace((await context.req.json()).path), 201));
-  app.get('/api/v1/sessions', context => context.json(runtime.state.sessions.filter(session => session.workspaceId === context.req.query('workspaceId')).map(({ messages, ...session }) => session)));
+  app.get('/api/v1/sessions', context => {
+    const offset = Math.max(0, Number(context.req.query('offset') || 0));
+    const limit = Math.min(100, Math.max(1, Number(context.req.query('limit') || 50)));
+    return context.json(runtime.state.sessions.filter(session => session.workspaceId === context.req.query('workspaceId')).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(offset, offset + limit).map(({ messages, ...session }) => ({ ...session, run: runtime.state.runs.filter(run => run.sessionId === session.id).at(-1) })));
+  });
   app.post('/api/v1/sessions', async context => context.json(runtime.createSession((await context.req.json()).workspaceId), 201));
   app.get('/api/v1/sessions/:id', context => context.json({ ...runtime.session(context.req.param('id')), runs: runtime.state.runs.filter(run => run.sessionId === context.req.param('id')), events: runtime.state.events.filter(event => event.sessionId === context.req.param('id')) }));
   app.get('/api/v1/runs/:id/events', context => {

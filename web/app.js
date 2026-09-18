@@ -9,7 +9,9 @@ element('composer').append(stopButton);
 stopButton.onclick = async () => { try { await api(`/runs/${streamingRun}/stop`, {}); await refresh(); } catch (error) { report(error); } };
 function renderEvents() {
   const events = [...streamEvents.values()].sort((left, right) => left.sequence - right.sequence);
-  element('live').textContent = events.filter(event => event.type === 'text').map(event => event.text).join('');
+  const attempts = new Map();
+  events.filter(event => !event.childRunId && ['text', 'retry'].includes(event.type)).forEach(event => attempts.set(event.step, Math.max(attempts.get(event.step) || 0, Number(event.attempt || 1) + (event.type === 'retry' ? 1 : 0))));
+  element('live').textContent = events.filter(event => !event.childRunId && event.type === 'text' && Number(event.attempt || 1) === attempts.get(event.step)).map(event => event.text).join('');
   element('events').replaceChildren(...events.filter(event => event.type !== 'text').map(event => {
     const detail = document.createElement('details');
     const summary = document.createElement('summary');

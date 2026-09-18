@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, realpathSync, statSync, accessSync, constants } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, realpathSync, statSync, accessSync, constants, copyFileSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import type { ModelMessage } from 'ai';
 import { executeWorker } from './worker-client.js';
 import { captureConfig, resolveConfig, type ConfigSnapshot } from './config.js';
 import { EventEmitter } from 'node:events';
-import { redact, collectSecrets, type AgentEvent, type ExecutionEvent } from './events.js';
+import { redact, collectSecrets, partialText, type AgentEvent, type ExecutionEvent } from './events.js';
 import { Pool } from './pool.js';
 
 export interface Workspace { id: string; path: string; name: string }
 export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot }
-export interface Run { id: string; sessionId: string; key: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'stopping' | 'cancelled' | 'interrupted'; error?: string }
+export interface Run { id: string; sessionId: string; key: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'stopping' | 'cancelled' | 'interrupted'; error?: string; messageOffset?: number; input?: string }
 interface State { workspaces: Workspace[]; sessions: Session[]; runs: Run[]; events: ExecutionEvent[] }
 export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void>; signal: AbortSignal }
 export type Executor = (execution: Execution) => Promise<ModelMessage[]>;
@@ -33,9 +33,25 @@ export class Runtime {
     if (!Number.isInteger(options.maxConcurrent ?? 3) || (options.maxConcurrent ?? 3) < 1) throw new RuntimeError('并发额度必须为正整数');
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     this.file = join(dataDir, 'state.json');
-    this.state = existsSync(this.file) ? JSON.parse(readFileSync(this.file, 'utf8')) : { workspaces: [], sessions: [], runs: [], events: [] };
+    try {
+      this.state = existsSync(this.file) ? JSON.parse(readFileSync(this.file, 'utf8')) : { workspaces: [], sessions: [], runs: [], events: [] };
+    } catch {
+      if (!existsSync(`${this.file}.bak`)) throw new Error('会话存储损坏且无备份；请保留数据文件后恢复备份');
+      this.state = JSON.parse(readFileSync(`${this.file}.bak`, 'utf8'));
+      console.warn('会话快照损坏，已从上一份备份恢复');
+    }
     this.state.events ||= [];
     this.bus.setMaxListeners(0);
+    for (const run of this.state.runs) {
+      if (!['queued', 'running', 'stopping'].includes(run.status)) continue;
+      run.status = 'interrupted';
+      run.error = '服务重启，任务已中断；手动继续会创建新任务，不自动重放工具操作';
+      this.preservePartial(run);
+      const children = new Map<string, ExecutionEvent>();
+      this.events(run.id).filter(event => event.type === 'child-status').forEach(event => children.set(String(event.childRunId), event));
+      for (const [childRunId, event] of children) if (['queued', 'running', 'stopping'].includes(String(event.status))) this.emit(run, { type: 'child-status', childRunId, status: 'interrupted' });
+      this.emit(run, { type: 'status', status: run.status, error: run.error });
+    }
   }
 
   private save() {
@@ -43,6 +59,7 @@ export class Runtime {
     const temporary = `${this.file}.tmp`;
     try {
       writeFileSync(temporary, JSON.stringify(this.state), { mode: 0o600 });
+      if (existsSync(this.file)) copyFileSync(this.file, `${this.file}.bak`);
       renameSync(temporary, this.file);
     } catch {
       this.storageError = new Error('执行记录无法保存，服务已停止接收任务；请检查磁盘后重启');
@@ -119,11 +136,14 @@ export class Runtime {
     const session = this.session(sessionId);
     if (typeof text !== 'string' || !text.trim() || typeof key !== 'string' || !key) throw new RuntimeError('消息和请求标识不能为空');
     const duplicate = this.state.runs.find(run => run.sessionId === sessionId && run.key === key);
-    if (duplicate) return duplicate;
+    if (duplicate) {
+      if (duplicate.input && duplicate.input !== text) throw new RuntimeError('同一请求标识不能用于不同消息', 409);
+      return duplicate;
+    }
     if (this.state.runs.some(run => run.sessionId === sessionId && ['queued', 'running', 'stopping'].includes(run.status))) throw new RuntimeError('当前会话已有待完成任务', 409);
     const workspace = this.workspace(session.workspaceId);
     if (!this.available(workspace)) throw new RuntimeError('工作目录已不可用');
-    const run: Run = { id: randomUUID(), sessionId, key, status: 'queued' };
+    const run: Run = { id: randomUUID(), sessionId, key, status: 'queued', input: text, messageOffset: session.messages.length + 1 };
     session.messages.push({ role: 'user', content: text });
     if (session.title === '新会话') session.title = text.slice(0, 50);
     session.updatedAt = new Date().toISOString();
@@ -166,6 +186,7 @@ export class Runtime {
     }
     session.updatedAt = new Date().toISOString();
     this.controllers.delete(run.id);
+    if (run.status !== 'completed') this.preservePartial(run);
     const children = new Map<string, ExecutionEvent>();
     this.events(run.id).filter(event => event.type === 'child-status').forEach(event => children.set(String(event.childRunId), event));
     for (const [childRunId, event] of children) if (['queued', 'running', 'stopping'].includes(String(event.status))) this.emit(run, { type: 'child-status', childRunId, rootRunId: run.id, parentRunId: run.id, status: controller.signal.aborted ? 'cancelled' : 'error' });
@@ -186,10 +207,22 @@ export class Runtime {
     return run;
   }
 
+  private preservePartial(run: Run) {
+    const session = this.session(run.sessionId);
+    if (run.messageOffset !== undefined && session.messages.length > run.messageOffset) return;
+    const text = partialText(this.events(run.id));
+    if (text) session.messages.push({ role: 'assistant', content: `[未完成的输出，工具操作不会自动重放]\n${text}` });
+  }
+
   async close() {
     this.closing = true;
+    const unfinished = this.state.runs.filter(run => ['queued', 'running', 'stopping'].includes(run.status));
     this.state.runs.forEach(run => this.stop(run.id));
     await this.idle();
+    for (const run of unfinished) {
+      run.status = 'interrupted'; run.error = '服务关闭，任务已中断';
+      this.emit(run, { type: 'status', status: run.status, error: run.error });
+    }
   }
 
   async idle() { while (this.jobs.size) await Promise.all(this.jobs); }
