@@ -30,7 +30,7 @@ async function refresh() {
     element('messages').replaceChildren();
     element('send').disabled = false;
   }
-  element('workspaces').replaceChildren(...workspaces.map(workspace => new Option(workspace.path, workspace.id, false, workspace.id === workspaceId)));
+  element('workspaces').replaceChildren(...workspaces.map(workspace => new Option(`${workspace.path}${workspace.available ? '' : ' · 不可用'}`, workspace.id, false, workspace.id === workspaceId)));
   const sessions = workspaceId ? await api(`/sessions?workspaceId=${workspaceId}`) : [];
   element('sessions').replaceChildren(...sessions.map(session => {
     const button = document.createElement('button');

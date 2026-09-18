@@ -16,7 +16,7 @@ export function createApp(runtime: Runtime) {
   });
   app.onError((error, context) => context.json({ error: error.message }, error instanceof RuntimeError ? error.status as 400 : 500));
   app.get('/api/v1/status', context => context.json({ status: 'ready' }));
-  app.get('/api/v1/workspaces', context => context.json(runtime.state.workspaces));
+  app.get('/api/v1/workspaces', context => context.json(runtime.listWorkspaces()));
   app.post('/api/v1/workspaces', async context => context.json(runtime.addWorkspace((await context.req.json()).path), 201));
   app.get('/api/v1/sessions', context => context.json(runtime.state.sessions.filter(session => session.workspaceId === context.req.query('workspaceId')).map(({ messages, ...session }) => session)));
   app.post('/api/v1/sessions', async context => context.json(runtime.createSession((await context.req.json()).workspaceId), 201));

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, realpathSync, statSync, accessSync, constants } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import type { ModelMessage } from 'ai';
 import { executeWorker } from './worker-client.js';
@@ -52,8 +52,17 @@ export class Runtime {
     return workspace;
   }
 
+  listWorkspaces() {
+    return this.state.workspaces.map(workspace => ({ ...workspace, available: this.available(workspace) }));
+  }
+
+  private available(workspace: Workspace) {
+    try { accessSync(workspace.path, constants.R_OK | constants.X_OK); return statSync(workspace.path).isDirectory(); }
+    catch { return false; }
+  }
+
   createSession(workspaceId: string) {
-    this.workspace(workspaceId);
+    if (!this.available(this.workspace(workspaceId))) throw new RuntimeError('工作目录已不可用');
     const session: Session = { id: randomUUID(), workspaceId, title: '新会话', updatedAt: new Date().toISOString(), messages: [] };
     this.state.sessions.push(session);
     this.save();
@@ -73,7 +82,7 @@ export class Runtime {
     if (duplicate) return duplicate;
     if (this.state.runs.some(run => run.sessionId === sessionId && ['queued', 'running', 'stopping'].includes(run.status))) throw new RuntimeError('当前会话已有待完成任务', 409);
     const workspace = this.workspace(session.workspaceId);
-    if (!existsSync(workspace.path)) throw new RuntimeError('工作目录已不可用');
+    if (!this.available(workspace)) throw new RuntimeError('工作目录已不可用');
     const run: Run = { id: randomUUID(), sessionId, key, status: 'running' };
     session.messages.push({ role: 'user', content: text });
     if (session.title === '新会话') session.title = text.slice(0, 50);

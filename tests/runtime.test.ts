@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Runtime } from '../src/runtime/service.js';
@@ -32,5 +32,26 @@ test('API rejects cross-origin writes and unknown sessions without executing', a
     const denied = await app.request('/api/v1/sessions', { method: 'POST', headers: { origin: 'https://evil.example', 'content-type': 'application/json' }, body: '{}' });
     assert.equal(denied.status, 403);
     assert.equal((await app.request('/api/v1/sessions/missing')).status, 404);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('workspace aliases deduplicate and unavailable directories retain history but reject new sessions', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cheese-dirs-'));
+  try {
+    const project = join(dir, 'project');
+    mkdirSync(project);
+    symlinkSync(project, join(dir, 'alias'));
+    const runtime = new Runtime(join(dir, 'state'), async ({ cwd, messages }) => [...messages, { role: 'assistant', content: readFileSync(join(cwd, 'same.txt'), 'utf8') }]);
+    const workspace = runtime.addWorkspace(project);
+    assert.equal(runtime.addWorkspace(join(dir, 'alias')).id, workspace.id);
+    const session = runtime.createSession(workspace.id);
+    writeFileSync(join(project, 'same.txt'), 'project contents');
+    runtime.submit(session.id, 'read', 'read');
+    await runtime.idle();
+    assert.equal(runtime.session(session.id).messages.at(-1)?.content, 'project contents');
+    rmSync(project, { recursive: true });
+    assert.equal(runtime.listWorkspaces()[0].available, false);
+    assert.throws(() => runtime.createSession(workspace.id), /不可用/);
+    assert.equal(runtime.session(session.id).messages.length, 2);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
