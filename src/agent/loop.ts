@@ -1,7 +1,7 @@
 import { streamText, type ModelMessage, NoOutputGeneratedError } from 'ai';
 import { ToolRegistry } from '../tools/registry.js';
 import { detect, recordCall, recordResult, resetHistory } from './loop-detection.js';
-import { isRetryable, calculateDelay, sleep } from './retry.js';
+import { isRetryable, calculateDelay } from './retry.js';
 import { type UsageTracker, normalizeUsage } from '../usage/tracker.js';
 import type { ExecutionOptions } from '../runtime/events.js';
 
@@ -58,6 +58,7 @@ export async function agentLoop(
   resetHistory();
 
   while (step < MAX_STEPS) {
+    options.signal?.throwIfAborted();
     step++;
     console.log(`\n--- Step ${step} ---`);
 
@@ -79,7 +80,7 @@ export async function agentLoop(
           model,
           abortSignal: options.signal,
           system,
-          tools: registry.toAISDKFormat(),
+          tools: registry.toAISDKFormat(options.signal),
           messages,
           maxRetries: 0, // 由外层 retry 逻辑进行精细化退避控制
           providerOptions: !isGoogle ? { openai: { parallelToolCalls: true, store: true} } : undefined,
@@ -154,6 +155,7 @@ export async function agentLoop(
         stepUsage = await result.usage;
         break; // 成功完成当前 Step，跳出重试循环
       } catch (error) {
+        options.signal?.throwIfAborted();
         // 异常诊断与重试判定
         if (NoOutputGeneratedError.isInstance(error)) {
           console.error('模型没有生成输出');
@@ -171,7 +173,11 @@ export async function agentLoop(
         const delay = calculateDelay(attempt);
         options.emit?.({ type: 'retry', step, attempt, delay });
         console.log(`  [重试] 第 ${attempt}/${MAX_RETRIES} 次，${delay}ms 后...`);
-        await sleep(delay);
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => { clearTimeout(timer); reject(options.signal?.reason); };
+          const timer = setTimeout(() => { options.signal?.removeEventListener('abort', abort); resolve(); }, delay);
+          options.signal?.addEventListener('abort', abort, { once: true });
+        });
 
         // 重置单步临时状态
         hasToolCall = false;

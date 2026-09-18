@@ -4,6 +4,9 @@ let sessionId = location.hash.slice(1);
 let stream;
 let streamingRun;
 let streamEvents = new Map();
+const stopButton = document.createElement('button'); stopButton.type = 'button'; stopButton.textContent = '停止任务'; stopButton.hidden = true;
+element('composer').append(stopButton);
+stopButton.onclick = async () => { try { await api(`/runs/${streamingRun}/stop`, {}); await refresh(); } catch (error) { report(error); } };
 function renderEvents() {
   const events = [...streamEvents.values()].sort((left, right) => left.sequence - right.sequence);
   element('live').textContent = events.filter(event => event.type === 'text').map(event => event.text).join('');
@@ -48,9 +51,13 @@ async function refresh() {
     renderEvents();
     element('live').hidden = !run || !['running', 'stopping'].includes(run.status);
     element('send').disabled = run && ['running', 'queued', 'stopping'].includes(run.status);
+    stopButton.hidden = !element('send').disabled;
+    stopButton.disabled = run?.status === 'stopping';
+    stopButton.textContent = run?.status === 'stopping' ? '正在停止…' : run?.status === 'queued' ? '取消排队' : '停止任务';
     element('connection').textContent = `${session.config?.values.model.name || 'Agent'} · ${run?.status || '就绪'}`;
     if (run?.error) element('error').textContent = run.error;
   } else {
+    stopButton.hidden = true;
     stream?.close(); streamingRun = undefined; streamEvents.clear(); renderEvents();
     element('title').textContent = '有什么值得一起探索？';
     element('messages').replaceChildren();

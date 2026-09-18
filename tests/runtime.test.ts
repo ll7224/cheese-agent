@@ -96,3 +96,31 @@ test('four same-directory sessions run at most three tasks and advance FIFO with
     assert.equal(runtime.status().active, 0);
   } finally { releases.forEach(release => release()); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('stopping one task cancels its permit waiters without stopping other sessions', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cheese-stop-'));
+  const releases: Array<() => void> = [];
+  try {
+    const runtime = new Runtime(dir, async ({ messages, signal }) => {
+      await new Promise<void>((resolve, reject) => {
+        releases.push(resolve);
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+      return messages;
+    });
+    const workspace = runtime.addWorkspace(dir);
+    const sessions = Array.from({ length: 4 }, () => runtime.createSession(workspace.id));
+    const runs = sessions.map((session, index) => runtime.submit(session.id, 'work', `key-${index}`));
+    runtime.stop(runs[3].id);
+    assert.equal(runs[3].status, 'cancelled');
+    runtime.stop(runs[0].id);
+    assert.equal(runs[0].status, 'stopping');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(runs[0].status, 'cancelled');
+    assert.equal(runs[1].status, 'running');
+    assert.equal(runtime.stop(runs[0].id).status, 'cancelled');
+    releases.forEach(release => release());
+    await runtime.idle();
+    assert.equal(runtime.status().active, 0);
+  } finally { releases.forEach(release => release()); rmSync(dir, { recursive: true, force: true }); }
+});

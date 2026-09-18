@@ -12,7 +12,7 @@ export interface Workspace { id: string; path: string; name: string }
 export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot }
 export interface Run { id: string; sessionId: string; key: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'stopping' | 'cancelled' | 'interrupted'; error?: string }
 interface State { workspaces: Workspace[]; sessions: Session[]; runs: Run[]; events: ExecutionEvent[] }
-export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void> }
+export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void>; signal: AbortSignal }
 export type Executor = (execution: Execution) => Promise<ModelMessage[]>;
 export class RuntimeError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -25,6 +25,8 @@ export class Runtime {
   private bus = new EventEmitter();
   private storageError?: Error;
   private children: Pool;
+  private controllers = new Map<string, AbortController>();
+  private closing = false;
 
   constructor(dataDir: string, private executor: Executor = executeWorker, private options: { configDir?: string; maxConcurrent?: number; maxChildren?: number } = {}) {
     this.children = new Pool(options.maxChildren ?? 3);
@@ -112,6 +114,7 @@ export class Runtime {
   }
 
   submit(sessionId: string, text: string, key: string) {
+    if (this.closing) throw new RuntimeError('服务正在关闭', 503);
     if (this.storageError) throw this.storageError;
     const session = this.session(sessionId);
     if (typeof text !== 'string' || !text.trim() || typeof key !== 'string' || !key) throw new RuntimeError('消息和请求标识不能为空');
@@ -135,7 +138,7 @@ export class Runtime {
   }
 
   private pump() {
-    if (this.storageError) return;
+    if (this.storageError || this.closing) return;
     while (this.jobs.size < (this.options.maxConcurrent ?? 3)) {
       const run = this.state.runs.find(item => item.status === 'queued');
       if (!run) break;
@@ -150,17 +153,43 @@ export class Runtime {
 
   private async execute(run: Run, session: Session, workspace: Workspace) {
     let secrets: string[] = [];
+    const controller = new AbortController();
+    this.controllers.set(run.id, controller);
     try {
       const config = session.config ? resolveConfig(session.config) : undefined;
       secrets = collectSecrets(config);
-      session.messages = redact(await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, emit: event => this.emit(run, { ...event, ...(event.childRunId ? { rootRunId: run.id, parentRunId: run.id } : {}) }, secrets), acquireChild: () => this.children.acquire() }), secrets);
-      run.status = 'completed';
+      session.messages = redact(await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, emit: event => this.emit(run, { ...event, ...(event.childRunId ? { rootRunId: run.id, parentRunId: run.id } : {}) }, secrets), acquireChild: () => this.children.acquire(controller.signal), signal: controller.signal }), secrets);
+      run.status = controller.signal.aborted ? 'cancelled' : 'completed';
     } catch (error) {
-      run.status = 'failed';
+      run.status = controller.signal.aborted ? 'cancelled' : 'failed';
       run.error = redact(error instanceof Error ? error.message : String(error), secrets);
     }
     session.updatedAt = new Date().toISOString();
+    this.controllers.delete(run.id);
+    const children = new Map<string, ExecutionEvent>();
+    this.events(run.id).filter(event => event.type === 'child-status').forEach(event => children.set(String(event.childRunId), event));
+    for (const [childRunId, event] of children) if (['queued', 'running', 'stopping'].includes(String(event.status))) this.emit(run, { type: 'child-status', childRunId, rootRunId: run.id, parentRunId: run.id, status: controller.signal.aborted ? 'cancelled' : 'error' });
     this.emit(run, { type: 'status', status: run.status, error: run.error });
+  }
+
+  stop(id: string) {
+    const run = this.state.runs.find(item => item.id === id);
+    if (!run) throw new RuntimeError('任务不存在', 404);
+    if (run.status === 'queued') {
+      run.status = 'cancelled';
+      this.emit(run, { type: 'status', status: run.status });
+    } else if (run.status === 'running') {
+      run.status = 'stopping';
+      this.emit(run, { type: 'status', status: run.status });
+      this.controllers.get(id)?.abort(new Error('用户停止了任务'));
+    }
+    return run;
+  }
+
+  async close() {
+    this.closing = true;
+    this.state.runs.forEach(run => this.stop(run.id));
+    await this.idle();
   }
 
   async idle() { while (this.jobs.size) await Promise.all(this.jobs); }

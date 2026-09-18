@@ -1,6 +1,13 @@
-const pending = new Map<string, () => void>();
+const pending = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
+const controller = new AbortController();
+process.on('disconnect', () => process.exit(1));
 process.on('message', (message: any) => {
-  if (message.type === 'child-granted') { pending.get(message.id)?.(); pending.delete(message.id); }
+  if (message.type === 'child-granted') { pending.get(message.id)?.resolve(); pending.delete(message.id); }
+  if (message.type === 'child-denied') { pending.get(message.id)?.reject(new Error('子任务已取消')); pending.delete(message.id); }
+  if (message.type === 'abort') {
+    controller.abort(new Error('用户停止了任务'));
+    pending.forEach(item => item.reject(new Error('子任务已取消'))); pending.clear();
+  }
 });
 process.once('message', async (request: any) => {
   try {
@@ -10,9 +17,11 @@ process.once('message', async (request: any) => {
     }
     const { runTask } = await import('../main.js');
     await runTask(request.messages, {
+      signal: controller.signal,
       emit: event => process.send?.({ type: 'event', event }),
       acquireChild: async id => {
-        await new Promise<void>(resolve => { pending.set(id, resolve); process.send?.({ type: 'child-acquire', id }); });
+        controller.signal.throwIfAborted();
+        await new Promise<void>((resolve, reject) => { pending.set(id, { resolve, reject }); process.send?.({ type: 'child-acquire', id }); });
         return () => { process.send?.({ type: 'child-release', id }); };
       },
     });

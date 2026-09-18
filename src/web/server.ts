@@ -41,6 +41,7 @@ export function createApp(runtime: Runtime) {
     const body = await context.req.json();
     return context.json(runtime.submit(context.req.param('id'), body.text, body.key), 202);
   });
+  app.post('/api/v1/runs/:id/stop', context => context.json(runtime.stop(context.req.param('id'))));
   app.get('/app.js', context => context.body(readFileSync(new URL('../../web/app.js', import.meta.url), 'utf8'), 200, { 'Content-Type': 'text/javascript' }));
   app.get('/style.css', context => context.body(readFileSync(new URL('../../web/style.css', import.meta.url), 'utf8'), 200, { 'Content-Type': 'text/css' }));
   app.get('*', context => context.html(readFileSync(new URL('../../web/index.html', import.meta.url), 'utf8')));
@@ -53,5 +54,8 @@ export function startWeb() {
   const port = Number(process.env.CHEESE_PORT || 3210);
   const server = serve({ fetch: createApp(runtime).fetch, hostname: '127.0.0.1', port }, info => console.log(`Cheese Agent → http://127.0.0.1:${info.port}`));
   server.on('error', error => { console.error(`Web 服务启动失败: ${error.message}`); process.exitCode = 1; });
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => {
+    void runtime.close().finally(() => { server.close(); process.exit(0); });
+  });
   return { runtime, server };
 }

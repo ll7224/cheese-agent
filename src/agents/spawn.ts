@@ -30,7 +30,7 @@ export async function spawnAgent(request: SpawnRequest, ctx: SpawnContext, index
   const signal = ctx.signal ? AbortSignal.any([ctx.signal, timeout.signal]) : timeout.signal;
   const messages: ModelMessage[] = [{ role: 'user', content: request.task }];
   try {
-    release = await (ctx.acquireChild ? ctx.acquireChild(childRunId) : localPool.acquire());
+    release = await (ctx.acquireChild ? ctx.acquireChild(childRunId) : localPool.acquire(ctx.signal));
     signal.throwIfAborted();
     run.status = 'running';
     run.startedAt = new Date().toISOString();
