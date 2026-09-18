@@ -49,6 +49,7 @@ import { SubAgentRegistry } from './agents/registry.js';
 import { createSpawnTool } from './tools/spawn-tools.js';
 import { createAgentCommands } from './commands/agent.js';
 import type { SpawnContext } from './agents/spawn.js';
+import type { ExecutionOptions } from './runtime/events.js';
 
 /**
  * ══════════════════════════════════════════════════════════════════════════════
@@ -386,8 +387,8 @@ export async function startAgent() {
   ask();
 }
 
-export async function runTask(messages: ModelMessage[]) {
+export async function runTask(messages: ModelMessage[], options: ExecutionOptions = {}) {
   await connectMCP();
-  await agentLoop(model, registry, messages, builder.build(makePromptCtx()));
+  await agentLoop(model, registry, messages, builder.build(makePromptCtx()), undefined, options);
   await registry.closeAllMCP();
 }

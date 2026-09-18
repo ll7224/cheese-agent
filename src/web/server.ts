@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
+import { streamSSE } from 'hono/streaming';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, join } from 'node:path';
@@ -20,7 +21,22 @@ export function createApp(runtime: Runtime) {
   app.post('/api/v1/workspaces', async context => context.json(runtime.addWorkspace((await context.req.json()).path), 201));
   app.get('/api/v1/sessions', context => context.json(runtime.state.sessions.filter(session => session.workspaceId === context.req.query('workspaceId')).map(({ messages, ...session }) => session)));
   app.post('/api/v1/sessions', async context => context.json(runtime.createSession((await context.req.json()).workspaceId), 201));
-  app.get('/api/v1/sessions/:id', context => context.json({ ...runtime.session(context.req.param('id')), runs: runtime.state.runs.filter(run => run.sessionId === context.req.param('id')) }));
+  app.get('/api/v1/sessions/:id', context => context.json({ ...runtime.session(context.req.param('id')), runs: runtime.state.runs.filter(run => run.sessionId === context.req.param('id')), events: runtime.state.events.filter(event => event.sessionId === context.req.param('id')) }));
+  app.get('/api/v1/runs/:id/events', context => {
+    const id = context.req.param('id');
+    const after = Number(context.req.header('last-event-id') || context.req.query('after') || 0);
+    if (!Number.isSafeInteger(after) || after < 0) throw new RuntimeError('无效事件游标');
+    runtime.events(id, after);
+    return streamSSE(context, async stream => {
+      let pending = Promise.resolve();
+      const send = (event: any) => { pending = pending.then(() => stream.writeSSE({ data: JSON.stringify(event), id: String(event.sequence) })).catch(() => {}); };
+      const unsubscribe = runtime.subscribe(id, send);
+      try {
+        runtime.events(id, after).forEach(send);
+        await new Promise<void>(resolve => { stream.onAbort(resolve); });
+      } finally { unsubscribe(); await pending.catch(() => {}); }
+    });
+  });
   app.post('/api/v1/sessions/:id/runs', async context => {
     const body = await context.req.json();
     return context.json(runtime.submit(context.req.param('id'), body.text, body.key), 202);

@@ -1,6 +1,20 @@
 const element = id => document.getElementById(id);
 let workspaceId = '';
 let sessionId = location.hash.slice(1);
+let stream;
+let streamingRun;
+let streamEvents = new Map();
+function renderEvents() {
+  const events = [...streamEvents.values()].sort((left, right) => left.sequence - right.sequence);
+  element('live').textContent = events.filter(event => event.type === 'text').map(event => event.text).join('');
+  element('events').replaceChildren(...events.filter(event => event.type !== 'text').map(event => {
+    const detail = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = `${event.name || event.type} · ${event.status || event.type}`;
+    const content = document.createElement('pre'); content.textContent = JSON.stringify(event, null, 2);
+    detail.append(summary, content); return detail;
+  }));
+}
 async function api(path, body) {
   const response = await fetch(`/api/v1${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
   const result = await response.json();
@@ -22,10 +36,22 @@ async function refresh() {
       return article;
     }));
     const run = session.runs.at(-1);
+    if (run?.id !== streamingRun) {
+      stream?.close(); streamingRun = run?.id;
+      streamEvents = new Map((session.events || []).filter(event => event.runId === run?.id).map(event => [event.sequence, event]));
+      if (run) {
+        const after = Math.max(0, ...streamEvents.keys());
+        stream = new EventSource(`/api/v1/runs/${run.id}/events?after=${after}`);
+        stream.onmessage = message => { const event = JSON.parse(message.data); streamEvents.set(event.sequence, event); renderEvents(); };
+      }
+    }
+    renderEvents();
+    element('live').hidden = !run || !['running', 'stopping'].includes(run.status);
     element('send').disabled = run && ['running', 'queued', 'stopping'].includes(run.status);
     element('connection').textContent = `${session.config?.values.model.name || 'Agent'} · ${run?.status || '就绪'}`;
     if (run?.error) element('error').textContent = run.error;
   } else {
+    stream?.close(); streamingRun = undefined; streamEvents.clear(); renderEvents();
     element('title').textContent = '有什么值得一起探索？';
     element('messages').replaceChildren();
     element('send').disabled = false;

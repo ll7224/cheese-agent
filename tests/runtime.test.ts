@@ -55,3 +55,24 @@ test('workspace aliases deduplicate and unavailable directories retain history b
     assert.equal(runtime.session(session.id).messages.length, 2);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('execution events persist with ordered cursors and redact credential fields', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cheese-events-'));
+  try {
+    const runtime = new Runtime(dir, async ({ messages, emit }) => {
+      emit({ type: 'text', text: 'hello', attempt: 1 });
+      emit({ type: 'tool-start', toolCallId: 'one', input: { apiKey: 'do-not-store' } });
+      emit({ type: 'tool-result', toolCallId: 'one', output: 'result' });
+      return [...messages, { role: 'assistant', content: 'hello' }];
+    });
+    const session = runtime.createSession(runtime.addWorkspace(dir).id);
+    const run = runtime.submit(session.id, 'hello', 'events');
+    await runtime.idle();
+    const events = runtime.events(run.id, 0);
+    assert.deepEqual(events.map(event => event.sequence), [1, 2, 3, 4, 5]);
+    assert.equal(JSON.stringify(events).includes('do-not-store'), false);
+    assert.equal(runtime.events(run.id, 3).length, 2);
+    const restored = new Runtime(dir);
+    assert.equal(restored.events(run.id, 0).length, 5);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

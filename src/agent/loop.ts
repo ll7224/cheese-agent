@@ -3,6 +3,7 @@ import { ToolRegistry } from '../tools/registry.js';
 import { detect, recordCall, recordResult, resetHistory } from './loop-detection.js';
 import { isRetryable, calculateDelay, sleep } from './retry.js';
 import { type UsageTracker, normalizeUsage } from '../usage/tracker.js';
+import type { ExecutionOptions } from '../runtime/events.js';
 
 /**
  * Agent 核心运行循环配置常量
@@ -49,6 +50,7 @@ export async function agentLoop(
   messages: ModelMessage[],
   system: string,
   tracker?: UsageTracker,
+  options: ExecutionOptions = {},
 ) {
   let step = 0;
   let totalTokens = 0;
@@ -65,6 +67,7 @@ export async function agentLoop(
     let lastToolCall: { name: string; input: unknown } | null = null;
     let stepResponse: any;
     let stepUsage: any;
+    const calls = new Map<string, { name: string; input: unknown }>();
 
     // ── 单步执行与重试循环 ──────────────────────────
     for (let attempt = 1; ; attempt++) {
@@ -74,6 +77,7 @@ export async function agentLoop(
         // 发起流式模型请求
         const result = streamText({
           model,
+          abortSignal: options.signal,
           system,
           tools: registry.toAISDKFormat(),
           messages,
@@ -89,6 +93,7 @@ export async function agentLoop(
           switch (part.type) {
             // 文本增量生成（即时打印打字机效果）
             case 'text-delta':
+              options.emit?.({ type: 'text', text: part.text, step, attempt });
               process.stdout.write(part.text);
               fullText += part.text;
               break;
@@ -97,6 +102,8 @@ export async function agentLoop(
             case 'tool-call': {
               hasToolCall = true;
               lastToolCall = { name: part.toolName, input: part.input };
+              calls.set(part.toolCallId, lastToolCall);
+              options.emit?.({ type: 'tool-start', toolCallId: part.toolCallId, name: part.toolName, input: part.input, step, attempt });
               console.log(`  [调用: ${part.toolName}(${JSON.stringify(part.input)})]`);
 
               // ── 接入死循环/乒乓检测 ──
@@ -120,21 +127,25 @@ export async function agentLoop(
 
             // 工具调用执行结果返回
             case 'tool-result': {
+              options.emit?.({ type: 'tool-result', toolCallId: part.toolCallId, name: part.toolName, output: part.output, step, attempt });
               const output = typeof part.output === 'string' ? part.output : JSON.stringify(part.output);
               const preview = output.length > 120 ? output.slice(0, 120) + '...' : output;
               console.log(`  [结果: ${part.toolName}] ${preview}`);
-              if (lastToolCall) {
+              const matchingCall = calls.get(part.toolCallId);
+              if (matchingCall) {
                 // 登记结果指纹，用于识别结果恒定不变的无进展重复
-                recordResult(lastToolCall.name, lastToolCall.input, part.output);
+                recordResult(matchingCall.name, matchingCall.input, part.output);
               }
               break;
             }
 
             // 流式错误事件
             case 'error': {
-              console.error('\n[流输出错误]', part.error);
-              break;
+              throw part.error;
             }
+            case 'tool-error':
+              options.emit?.({ type: 'tool-error', toolCallId: part.toolCallId, name: part.toolName, error: String(part.error), step, attempt });
+              break;
           }
         }
 
@@ -158,6 +169,7 @@ export async function agentLoop(
 
         // 计算带抖动的指数退避时间
         const delay = calculateDelay(attempt);
+        options.emit?.({ type: 'retry', step, attempt, delay });
         console.log(`  [重试] 第 ${attempt}/${MAX_RETRIES} 次，${delay}ms 后...`);
         await sleep(delay);
 

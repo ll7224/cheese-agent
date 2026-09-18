@@ -4,12 +4,14 @@ import { join, isAbsolute } from 'node:path';
 import type { ModelMessage } from 'ai';
 import { executeWorker } from './worker-client.js';
 import { captureConfig, resolveConfig, type ConfigSnapshot } from './config.js';
+import { EventEmitter } from 'node:events';
+import { redact, collectSecrets, type AgentEvent, type ExecutionEvent } from './events.js';
 
 export interface Workspace { id: string; path: string; name: string }
 export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot }
 export interface Run { id: string; sessionId: string; key: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'stopping' | 'cancelled' | 'interrupted'; error?: string }
-interface State { workspaces: Workspace[]; sessions: Session[]; runs: Run[] }
-export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown }
+interface State { workspaces: Workspace[]; sessions: Session[]; runs: Run[]; events: ExecutionEvent[] }
+export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; emit: (event: AgentEvent) => void }
 export type Executor = (execution: Execution) => Promise<ModelMessage[]>;
 export class RuntimeError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -19,17 +21,45 @@ export class Runtime {
   state: State;
   private file: string;
   private jobs = new Set<Promise<void>>();
+  private bus = new EventEmitter();
+  private storageError?: Error;
 
   constructor(dataDir: string, private executor: Executor = executeWorker, private options: { configDir?: string } = {}) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     this.file = join(dataDir, 'state.json');
-    this.state = existsSync(this.file) ? JSON.parse(readFileSync(this.file, 'utf8')) : { workspaces: [], sessions: [], runs: [] };
+    this.state = existsSync(this.file) ? JSON.parse(readFileSync(this.file, 'utf8')) : { workspaces: [], sessions: [], runs: [], events: [] };
+    this.state.events ||= [];
+    this.bus.setMaxListeners(0);
   }
 
   private save() {
+    if (this.storageError) throw this.storageError;
     const temporary = `${this.file}.tmp`;
-    writeFileSync(temporary, JSON.stringify(this.state), { mode: 0o600 });
-    renameSync(temporary, this.file);
+    try {
+      writeFileSync(temporary, JSON.stringify(this.state), { mode: 0o600 });
+      renameSync(temporary, this.file);
+    } catch {
+      this.storageError = new Error('执行记录无法保存，服务已停止接收任务；请检查磁盘后重启');
+      throw this.storageError;
+    }
+  }
+
+  events(runId: string, after = 0) {
+    if (!this.state.runs.some(run => run.id === runId)) throw new RuntimeError('任务不存在', 404);
+    return this.state.events.filter(event => event.runId === runId && event.sequence > after);
+  }
+
+  subscribe(runId: string, listener: (event: ExecutionEvent) => void) {
+    this.bus.on(runId, listener);
+    return () => { this.bus.off(runId, listener); };
+  }
+
+  private emit(run: Run, event: AgentEvent, secrets: string[] = []) {
+    const session = this.session(run.sessionId);
+    const entry: ExecutionEvent = { ...redact(event, secrets), id: randomUUID(), runId: run.id, sessionId: session.id, workspaceId: session.workspaceId, sequence: this.events(run.id).length + 1, timestamp: new Date().toISOString() };
+    this.state.events.push(entry);
+    this.save();
+    this.bus.emit(run.id, entry);
   }
 
   addWorkspace(path: string) {
@@ -78,6 +108,7 @@ export class Runtime {
   }
 
   submit(sessionId: string, text: string, key: string) {
+    if (this.storageError) throw this.storageError;
     const session = this.session(sessionId);
     if (typeof text !== 'string' || !text.trim() || typeof key !== 'string' || !key) throw new RuntimeError('消息和请求标识不能为空');
     const duplicate = this.state.runs.find(run => run.sessionId === sessionId && run.key === key);
@@ -90,23 +121,26 @@ export class Runtime {
     if (session.title === '新会话') session.title = text.slice(0, 50);
     session.updatedAt = new Date().toISOString();
     this.state.runs.push(run);
-    this.save();
+    this.emit(run, { type: 'status', status: run.status });
     const job = this.execute(run, session, workspace);
     this.jobs.add(job);
-    void job.finally(() => this.jobs.delete(job));
+    void job.finally(() => this.jobs.delete(job)).catch(() => {});
     return run;
   }
 
   private async execute(run: Run, session: Session, workspace: Workspace) {
+    let secrets: string[] = [];
     try {
-      session.messages = await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config: session.config ? resolveConfig(session.config) : undefined });
+      const config = session.config ? resolveConfig(session.config) : undefined;
+      secrets = collectSecrets(config);
+      session.messages = redact(await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, emit: event => this.emit(run, event, secrets) }), secrets);
       run.status = 'completed';
     } catch (error) {
       run.status = 'failed';
-      run.error = error instanceof Error ? error.message : String(error);
+      run.error = redact(error instanceof Error ? error.message : String(error), secrets);
     }
     session.updatedAt = new Date().toISOString();
-    this.save();
+    this.emit(run, { type: 'status', status: run.status, error: run.error });
   }
 
   async idle() { await Promise.all(this.jobs); }
