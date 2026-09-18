@@ -3,9 +3,10 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, realpat
 import { join, isAbsolute } from 'node:path';
 import type { ModelMessage } from 'ai';
 import { executeWorker } from './worker-client.js';
+import { captureConfig, resolveConfig, type ConfigSnapshot } from './config.js';
 
 export interface Workspace { id: string; path: string; name: string }
-export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[] }
+export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot }
 export interface Run { id: string; sessionId: string; key: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'stopping' | 'cancelled' | 'interrupted'; error?: string }
 interface State { workspaces: Workspace[]; sessions: Session[]; runs: Run[] }
 export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown }
@@ -19,7 +20,7 @@ export class Runtime {
   private file: string;
   private jobs = new Set<Promise<void>>();
 
-  constructor(dataDir: string, private executor: Executor = executeWorker) {
+  constructor(dataDir: string, private executor: Executor = executeWorker, private options: { configDir?: string } = {}) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     this.file = join(dataDir, 'state.json');
     this.state = existsSync(this.file) ? JSON.parse(readFileSync(this.file, 'utf8')) : { workspaces: [], sessions: [], runs: [] };
@@ -63,7 +64,8 @@ export class Runtime {
 
   createSession(workspaceId: string) {
     if (!this.available(this.workspace(workspaceId))) throw new RuntimeError('工作目录已不可用');
-    const session: Session = { id: randomUUID(), workspaceId, title: '新会话', updatedAt: new Date().toISOString(), messages: [] };
+    const config = captureConfig(this.options.configDir || this.workspace(workspaceId).path, this.workspace(workspaceId).path);
+    const session: Session = { id: randomUUID(), workspaceId, title: '新会话', updatedAt: new Date().toISOString(), messages: [], config };
     this.state.sessions.push(session);
     this.save();
     return session;
@@ -97,7 +99,7 @@ export class Runtime {
 
   private async execute(run: Run, session: Session, workspace: Workspace) {
     try {
-      session.messages = await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages) });
+      session.messages = await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config: session.config ? resolveConfig(session.config) : undefined });
       run.status = 'completed';
     } catch (error) {
       run.status = 'failed';

@@ -23,7 +23,7 @@ async function refresh() {
     }));
     const run = session.runs.at(-1);
     element('send').disabled = run && ['running', 'queued', 'stopping'].includes(run.status);
-    element('connection').textContent = run?.status || '就绪';
+    element('connection').textContent = `${session.config?.values.model.name || 'Agent'} · ${run?.status || '就绪'}`;
     if (run?.error) element('error').textContent = run.error;
   } else {
     element('title').textContent = '有什么值得一起探索？';
