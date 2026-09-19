@@ -10,9 +10,11 @@ import { acquireServiceLock } from '../runtime/service-lock.js';
 import { captureConfig, resolveConfig } from '../runtime/config.js';
 import { ChannelGateway } from '../channels/gateway.js';
 import { FeishuChannel } from '../channels/feishu.js';
+import { selectLocalDirectory } from './directory-picker.js';
 
-export function createApp(runtime: Runtime) {
+export function createApp(runtime: Runtime, chooseDirectory: () => Promise<string | null> = selectLocalDirectory) {
   const app = new Hono();
+  let choosingDirectory = false;
   app.use('/api/*', bodyLimit({ maxSize: 1_048_576, onError: context => context.json({ error: '请求超过 1 MiB 限制' }, 413) }));
   app.use('/api/*', async (context, next) => {
     const origin = context.req.header('origin');
@@ -36,6 +38,12 @@ export function createApp(runtime: Runtime) {
   app.get('/api/v1/status', context => context.json(runtime.status()));
   app.get('/api/v1/workspaces', context => context.json(runtime.listWorkspaces()));
   app.post('/api/v1/workspaces', async context => context.json(runtime.addWorkspace((await context.req.json()).path), 201));
+  app.post('/api/v1/workspaces/pick-directory', async context => {
+    if (choosingDirectory) throw new RuntimeError('文件夹选择器已打开，请先完成当前选择。', 409);
+    choosingDirectory = true;
+    try { return context.json({ path: await chooseDirectory() }); }
+    finally { choosingDirectory = false; }
+  });
   app.get('/api/v1/sessions', context => {
     const offset = Number(context.req.query('offset') || 0);
     const requestedLimit = Number(context.req.query('limit') || 50);

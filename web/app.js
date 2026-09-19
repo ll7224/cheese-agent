@@ -216,14 +216,48 @@ element('new-task').onclick = () => { navigate(); element('prompt').focus(); };
 element('workspaces').onchange = event => { workspaceId = event.target.value; sessionLimit = 50; navigate(); };
 element('load-more').onclick = () => { sessionLimit += 50; refresh(); };
 document.querySelectorAll('[data-prompt]').forEach(button => { button.onclick = () => { element('prompt').value = button.dataset.prompt; element('prompt').dispatchEvent(new Event('input')); element('prompt').focus(); }; });
-element('add-workspace').onclick = () => { element('directory-error').textContent = ''; element('directory-dialog').showModal(); element('directory-path').focus(); };
+let choosingDirectory = false;
+element('add-workspace').onclick = () => {
+  element('directory-error').textContent = '';
+  element('directory-status').textContent = '';
+  element('directory-manual').open = false;
+  element('directory-dialog').showModal();
+  element('pick-directory').focus();
+};
 element('close-directory').onclick = () => element('directory-dialog').close();
 element('directory-dialog').addEventListener('close', () => element('add-workspace').focus());
+element('directory-dialog').addEventListener('cancel', event => { if (choosingDirectory) event.preventDefault(); });
+async function connectDirectory(path) {
+  const workspace = await api('/workspaces', { path });
+  workspaceId = workspace.id; sessionLimit = 50;
+  element('directory-dialog').close(); navigate();
+}
+element('pick-directory').onclick = async () => {
+  if (choosingDirectory) return;
+  choosingDirectory = true;
+  for (const id of ['pick-directory', 'connect-directory', 'close-directory']) element(id).disabled = true;
+  element('directory-error').textContent = '';
+  element('directory-status').textContent = '请在系统窗口中选择文件夹…';
+  try {
+    const { path } = await api('/workspaces/pick-directory', {});
+    if (path) await connectDirectory(path);
+    else element('directory-status').textContent = '已取消选择，可以重新选择文件夹。';
+  } catch (error) {
+    element('directory-status').textContent = '';
+    element('directory-error').textContent = error.message;
+    element('directory-manual').open = true;
+    element('directory-path').focus();
+  } finally {
+    choosingDirectory = false;
+    for (const id of ['pick-directory', 'connect-directory', 'close-directory']) element(id).disabled = false;
+    if (element('directory-dialog').open && !element('directory-manual').open) element('pick-directory').focus();
+  }
+};
 element('directory-form').onsubmit = async event => {
   event.preventDefault();
+  if (choosingDirectory) return;
   try {
-    const workspace = await api('/workspaces', { path: element('directory-path').value.trim() });
-    workspaceId = workspace.id; element('directory-dialog').close(); navigate();
+    await connectDirectory(element('directory-path').value.trim());
   } catch (error) { element('directory-error').textContent = error.message; }
 };
 function setSidebar(open) { document.body.classList.toggle('sidebar-collapsed', !open); element('toggle-sidebar').setAttribute('aria-expanded', String(open)); }

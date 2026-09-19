@@ -45,7 +45,18 @@
       </main>
     </div>
   </div>
-  <dialog id="directory-dialog"><form id="directory-form"><div class="dialog-heading"><span class="eyebrow">CONNECT WORKSPACE</span><button class="icon-button" type="button" id="close-directory" aria-label="关闭目录弹窗">×</button></div><h2>接入你的工作目录</h2><p>选择已存在的本机文件夹。每个会话会固定在所选目录中工作。</p><label for="directory-path">文件夹绝对路径</label><input id="directory-path" placeholder="/Users/you/projects/my-project" required autocomplete="off"><p id="directory-error" class="error" role="alert"></p><button class="send-button" type="submit">接入目录 ↗</button></form></dialog>
+  <dialog id="directory-dialog" aria-labelledby="directory-title">
+    <div class="dialog-heading"><span class="eyebrow">CONNECT WORKSPACE</span><button class="icon-button" type="button" id="close-directory" aria-label="关闭目录弹窗">×</button></div>
+    <h2 id="directory-title">接入你的工作目录</h2>
+    <p>选择已存在的本机文件夹。每个会话会固定在所选目录中工作。</p>
+    <button class="send-button directory-picker" type="button" id="pick-directory">选择本地文件夹 ↗</button>
+    <p id="directory-status" role="status" aria-live="polite"></p>
+    <details id="directory-manual"><summary>手动输入路径</summary><form id="directory-form">
+      <label for="directory-path">文件夹绝对路径</label><input id="directory-path" placeholder="/Users/you/projects/my-project" required autocomplete="off">
+      <button class="send-button" id="connect-directory" type="submit">接入目录 ↗</button>
+    </form></details>
+    <p id="directory-error" class="error" role="alert"></p>
+  </dialog>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
