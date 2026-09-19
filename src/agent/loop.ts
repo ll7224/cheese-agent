@@ -73,7 +73,7 @@ export async function agentLoop(
     // ── 单步执行与重试循环 ──────────────────────────
     for (let attempt = 1; ; attempt++) {
       try {
-        const isGoogle = (process.env.MODEL_PROVIDER || '').toLowerCase() === 'google' || (process.env.MODEL_PROVIDER || '').toLowerCase() === 'gemini';
+        const isGoogle = String(model.provider || '').startsWith('google');
 
         // 发起流式模型请求
         const result = streamText({

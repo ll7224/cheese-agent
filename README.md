@@ -2,6 +2,8 @@
 
 [中文 (Chinese)](#-cheese-agent-中文) | [English](#-cheese-agent-english)
 
+本机 Web 工作台：`npm run web` → `http://127.0.0.1:3210`。支持多目录、多会话并发和任务树停止，详见[安装与使用](docs/local-web-workbench.md)及[验收记录](docs/verification/local-agent-ui.md)。
+
 ---
 
 # 🧀 Cheese Agent (中文)

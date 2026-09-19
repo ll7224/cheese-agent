@@ -156,7 +156,7 @@ async function refresh() {
       renderMessages(session); connectEvents(currentRun, session.events || []);
       if (currentRun?.error) report(new Error(currentRun.error));
     }
-    const sessions = workspaceId ? await api(`/sessions?workspaceId=${workspaceId}&limit=${sessionLimit}`) : [];
+    const sessions = workspaceId ? (await Promise.all(Array.from({ length: Math.ceil(sessionLimit / 50) }, (_, page) => api(`/sessions?workspaceId=${workspaceId}&limit=50&offset=${page * 50}`)))).flat() : [];
     if (sessionId !== requestedSession) return;
     element('sessions').replaceChildren(...sessions.map(item => {
       const button = node('button', item.id === sessionId ? 'selected' : '');
@@ -166,14 +166,15 @@ async function refresh() {
       return button;
     }));
     if (!sessions.length) element('sessions').append(node('p', 'empty-history', '还没有会话。\n从一个想法开始吧。'));
-    element('load-more').hidden = sessions.length < sessionLimit || sessionLimit >= 100;
+    element('load-more').hidden = sessions.length < sessionLimit;
     const others = sessions.filter(item => item.id !== sessionId && active(item.run?.status));
     const unavailable = !workspaces.find(workspace => workspace.id === workspaceId)?.available;
     element('notice').hidden = !others.length && !unavailable && !['interrupted', 'cancelled'].includes(currentRun?.status);
     element('notice').textContent = unavailable ? '目录不可用。你仍可查看历史；恢复目录或选择其他目录后再开始任务。' : others.length ? `此目录另有 ${others.length} 个待完成任务。会话共享实际文件，修改可能互相覆盖。` : '上次执行已停止或中断，已完成修改会保留。输入补充要求即可继续，不会自动重放旧工具操作。';
     const metric = (id, count, limit) => { element(id).replaceChildren(document.createTextNode(String(count)), ...(limit ? [node('span', '', `/ ${limit}`)] : [])); };
     metric('main-count', status.active, status.limit); metric('child-count', status.children.active, status.children.limit); metric('queued-count', status.queued);
-    element('core-status').textContent = status.active ? `${status.active} TASKS ACTIVE` : 'SYSTEM READY';
+    element('core-status').textContent = status.status === 'storage-error' ? 'STORAGE ERROR' : status.active ? `${status.active} TASKS ACTIVE` : 'SYSTEM READY';
+    if (status.status === 'storage-error') report(new Error('执行记录无法保存，服务已停止接收任务。请检查磁盘后重启。'));
     document.body.dataset.active = String(status.active > 0);
     connection(true); renderControls();
   } catch (error) { connection(false); report(error); }
@@ -213,7 +214,7 @@ element('stop').onclick = async () => {
 };
 element('new-task').onclick = () => { navigate(); element('prompt').focus(); };
 element('workspaces').onchange = event => { workspaceId = event.target.value; sessionLimit = 50; navigate(); };
-element('load-more').onclick = () => { sessionLimit = 100; refresh(); };
+element('load-more').onclick = () => { sessionLimit += 50; refresh(); };
 document.querySelectorAll('[data-prompt]').forEach(button => { button.onclick = () => { element('prompt').value = button.dataset.prompt; element('prompt').dispatchEvent(new Event('input')); element('prompt').focus(); }; });
 element('add-workspace').onclick = () => { element('directory-error').textContent = ''; element('directory-dialog').showModal(); element('directory-path').focus(); };
 element('close-directory').onclick = () => element('directory-dialog').close();

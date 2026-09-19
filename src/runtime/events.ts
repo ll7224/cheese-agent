@@ -1,6 +1,6 @@
 export interface AgentEvent { type: string; [key: string]: unknown }
 export interface ExecutionEvent extends AgentEvent { id: string; runId: string; sessionId: string; workspaceId: string; sequence: number; timestamp: string }
-export interface ExecutionOptions { emit?: (event: AgentEvent) => void; signal?: AbortSignal; acquireChild?: (id: string) => Promise<() => void> }
+export interface ExecutionOptions { emit?: (event: AgentEvent) => void; signal?: AbortSignal; acquireChild?: (id: string) => Promise<() => void>; manageCron?: (input: any) => Promise<unknown> }
 
 export function redact(value: any, secrets: string[] = []): any {
   if (typeof value === 'string') {
@@ -16,6 +16,33 @@ export function redact(value: any, secrets: string[] = []): any {
 export function collectSecrets(value: any): string[] {
   if (!value || typeof value !== 'object') return [];
   return Object.entries(value).flatMap(([key, entry]) => /apiKey|appSecret|password|token|secret/i.test(key) && typeof entry === 'string' ? [entry] : collectSecrets(entry));
+}
+
+export function redactStream(secrets: string[], emit: (event: AgentEvent) => void) {
+  const pending = new Map<string, AgentEvent>();
+  const values = secrets.filter(secret => secret.length > 3).sort((left, right) => right.length - left.length);
+  return {
+    push(event: AgentEvent) {
+      if (event.type !== 'text' || typeof event.text !== 'string') { emit(event); return; }
+      const key = JSON.stringify([event.childRunId, event.step, event.attempt]);
+      const text = String(pending.get(key)?.text || '') + event.text;
+      const safe = redact(text, values);
+      let retained = 0;
+      for (const secret of values) {
+        for (let length = 1; length < secret.length && length <= safe.length; length++) {
+          if (safe.endsWith(secret.slice(0, length))) retained = Math.max(retained, length);
+        }
+      }
+      pending.delete(key);
+      if (retained) pending.set(key, { ...event, text: safe.slice(-retained) });
+      const output = safe.slice(0, safe.length - retained);
+      if (output) emit({ ...event, text: output });
+    },
+    flush() {
+      for (const event of pending.values()) emit({ ...event, text: '[已隐藏]' });
+      pending.clear();
+    },
+  };
 }
 
 export function partialText(events: AgentEvent[]): string {

@@ -5,14 +5,23 @@ import type { ModelMessage } from 'ai';
 import { executeWorker } from './worker-client.js';
 import { captureConfig, resolveConfig, type ConfigSnapshot } from './config.js';
 import { EventEmitter } from 'node:events';
-import { redact, collectSecrets, partialText, type AgentEvent, type ExecutionEvent } from './events.js';
+import { redact, redactStream, collectSecrets, partialText, type AgentEvent, type ExecutionEvent } from './events.js';
 import { Pool } from './pool.js';
+import { CronService } from '../cron/service.js';
+import { createCronTool } from '../tools/cron-tools.js';
+import type { CheeseAgentConfig } from '../config/schema.js';
 
 export interface Workspace { id: string; path: string; name: string }
-export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot }
+export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot; source?: string }
 export interface Run { id: string; sessionId: string; key: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'stopping' | 'cancelled' | 'interrupted'; error?: string; messageOffset?: number; input?: string }
 interface State { workspaces: Workspace[]; sessions: Session[]; runs: Run[]; events: ExecutionEvent[] }
-export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void>; signal: AbortSignal }
+function readState(file: string): State {
+  const state = JSON.parse(readFileSync(file, 'utf8'));
+  if (!state || !['workspaces', 'sessions', 'runs'].every(key => Array.isArray(state[key])) || (state.events && !Array.isArray(state.events))) throw new Error('无效会话快照');
+  if (state.workspaces.some((workspace: any) => !workspace?.id || typeof workspace.path !== 'string') || state.sessions.some((session: any) => !session?.id || !Array.isArray(session.messages) || !state.workspaces.some((workspace: any) => workspace.id === session.workspaceId)) || state.runs.some((run: any) => !run?.id || !state.sessions.some((session: any) => session.id === run.sessionId))) throw new Error('会话快照关联已损坏');
+  return state;
+}
+export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void>; manageCron: (input: any) => Promise<unknown>; signal: AbortSignal }
 export type Executor = (execution: Execution) => Promise<ModelMessage[]>;
 export class RuntimeError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -27,6 +36,10 @@ export class Runtime {
   private children: Pool;
   private controllers = new Map<string, AbortController>();
   private closing = false;
+  private crons = new Map<string, CronService>();
+  private cronDirectories = new Map<string, string>();
+  private schedulesEnabled = false;
+  private recoveredBackup = false;
 
   constructor(dataDir: string, private executor: Executor = executeWorker, private options: { configDir?: string; maxConcurrent?: number; maxChildren?: number } = {}) {
     this.children = new Pool(options.maxChildren ?? 3);
@@ -34,10 +47,11 @@ export class Runtime {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     this.file = join(dataDir, 'state.json');
     try {
-      this.state = existsSync(this.file) ? JSON.parse(readFileSync(this.file, 'utf8')) : { workspaces: [], sessions: [], runs: [], events: [] };
+      this.state = existsSync(this.file) ? readState(this.file) : { workspaces: [], sessions: [], runs: [], events: [] };
     } catch {
       if (!existsSync(`${this.file}.bak`)) throw new Error('会话存储损坏且无备份；请保留数据文件后恢复备份');
-      this.state = JSON.parse(readFileSync(`${this.file}.bak`, 'utf8'));
+      this.state = readState(`${this.file}.bak`);
+      this.recoveredBackup = true;
       console.warn('会话快照损坏，已从上一份备份恢复');
     }
     this.state.events ||= [];
@@ -59,10 +73,12 @@ export class Runtime {
     const temporary = `${this.file}.tmp`;
     try {
       writeFileSync(temporary, JSON.stringify(this.state), { mode: 0o600 });
-      if (existsSync(this.file)) copyFileSync(this.file, `${this.file}.bak`);
+      if (existsSync(this.file) && !this.recoveredBackup) copyFileSync(this.file, `${this.file}.bak`);
       renameSync(temporary, this.file);
+      this.recoveredBackup = false;
     } catch {
       this.storageError = new Error('执行记录无法保存，服务已停止接收任务；请检查磁盘后重启');
+      this.controllers.forEach(controller => controller.abort(this.storageError));
       throw this.storageError;
     }
   }
@@ -118,6 +134,7 @@ export class Runtime {
   createSession(workspaceId: string) {
     if (!this.available(this.workspace(workspaceId))) throw new RuntimeError('工作目录已不可用');
     const config = captureConfig(this.options.configDir || this.workspace(workspaceId).path, this.workspace(workspaceId).path);
+    if (this.schedulesEnabled) this.cron(workspaceId, config.values);
     const session: Session = { id: randomUUID(), workspaceId, title: '新会话', updatedAt: new Date().toISOString(), messages: [], config };
     this.state.sessions.push(session);
     this.save();
@@ -128,6 +145,64 @@ export class Runtime {
     const session = this.state.sessions.find(item => item.id === id);
     if (!session) throw new RuntimeError('会话不存在', 404);
     return session;
+  }
+
+  async runPrompt(workspaceId: string, text: string, source?: string, timeout?: number): Promise<string> {
+    const session = (source && this.state.sessions.find(item => item.workspaceId === workspaceId && item.source === source)) || this.createSession(workspaceId);
+    if (source) session.source = source;
+    const run = this.submit(session.id, text, randomUUID());
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribe = () => {};
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const check = () => {
+          if (run.status === 'completed') resolve();
+          else if (['failed', 'cancelled', 'interrupted'].includes(run.status)) reject(new Error(run.error || run.status));
+        };
+        unsubscribe = this.subscribe(run.id, check);
+        if (timeout) timer = setTimeout(() => { this.stop(run.id); }, timeout);
+        check();
+      });
+      const last = session.messages.at(-1);
+      if (!last || last.role !== 'assistant') return '(无输出)';
+      return typeof last.content === 'string' ? last.content : last.content.filter(part => part.type === 'text').map(part => part.text).join('');
+    } finally { clearTimeout(timer); unsubscribe(); }
+  }
+
+  enableSchedules() {
+    this.schedulesEnabled = true;
+    for (const workspace of this.state.workspaces) {
+      try { this.cron(workspace.id, captureConfig(this.options.configDir || workspace.path, workspace.path).values); }
+      catch { console.warn(`目录 ${workspace.path} 的定时任务未启动，请检查目录配置`); }
+    }
+  }
+
+  private cron(workspaceId: string, config: CheeseAgentConfig) {
+    if (!config.cron.enabled) return;
+    const existing = this.crons.get(workspaceId);
+    if (existing) return existing;
+    const owner = this.cronDirectories.get(config.cron.dataDir);
+    if (owner && owner !== workspaceId) throw new RuntimeError('Cron 数据目录已绑定其他工作目录，请在目录配置中指定独立 cron.dataDir');
+    const service = new CronService(config.cron.dataDir);
+    service.load();
+    service.setExecutor({ runAgentPrompt: (prompt, timeout) => this.runPrompt(workspaceId, prompt, undefined, timeout) });
+    this.crons.set(workspaceId, service);
+    this.cronDirectories.set(config.cron.dataDir, workspaceId);
+    if (this.schedulesEnabled) service.start();
+    return service;
+  }
+
+  async manageCron(workspaceId: string, input: any, config?: CheeseAgentConfig) {
+    if (this.closing) throw new RuntimeError('服务正在关闭', 503);
+    const workspace = this.workspace(workspaceId);
+    const service = this.cron(workspaceId, config || captureConfig(this.options.configDir || workspace.path, workspace.path).values);
+    if (!service) throw new RuntimeError('当前会话未启用定时任务');
+    if (input?.action === 'run') {
+      if (!service.list().some(item => item.config.id === input.id)) throw new RuntimeError('定时任务不存在', 404);
+      void service.runNow(input.id).catch(error => console.error('定时任务失败', error));
+      return '已提交定时任务，结果请查看执行记录';
+    }
+    return createCronTool(service).execute(input);
   }
 
   submit(sessionId: string, text: string, key: string) {
@@ -173,12 +248,14 @@ export class Runtime {
 
   private async execute(run: Run, session: Session, workspace: Workspace) {
     let secrets: string[] = [];
+    let stream: ReturnType<typeof redactStream> | undefined;
     const controller = new AbortController();
     this.controllers.set(run.id, controller);
     try {
       const config = session.config ? resolveConfig(session.config) : undefined;
       secrets = collectSecrets(config);
-      session.messages = redact(await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, emit: event => this.emit(run, { ...event, ...(event.childRunId ? { rootRunId: run.id, parentRunId: run.id } : {}) }, secrets), acquireChild: () => this.children.acquire(controller.signal), signal: controller.signal }), secrets);
+      stream = redactStream(secrets, event => this.emit(run, { ...event, ...(event.childRunId ? { rootRunId: run.id, parentRunId: run.id } : {}) }, secrets));
+      session.messages = redact(await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, emit: event => stream!.push(event), acquireChild: () => this.children.acquire(controller.signal), manageCron: input => { controller.signal.throwIfAborted(); return this.manageCron(workspace.id, input, config); }, signal: controller.signal }), secrets);
       run.status = controller.signal.aborted ? 'cancelled' : 'completed';
     } catch (error) {
       run.status = controller.signal.aborted ? 'cancelled' : 'failed';
@@ -186,6 +263,7 @@ export class Runtime {
     }
     session.updatedAt = new Date().toISOString();
     this.controllers.delete(run.id);
+    stream?.flush();
     if (run.status !== 'completed') this.preservePartial(run);
     const children = new Map<string, ExecutionEvent>();
     this.events(run.id).filter(event => event.type === 'child-status').forEach(event => children.set(String(event.childRunId), event));
@@ -216,6 +294,12 @@ export class Runtime {
 
   async close() {
     this.closing = true;
+    this.crons.forEach(service => service.stop());
+    if (this.storageError) {
+      this.controllers.forEach(controller => controller.abort(this.storageError));
+      await Promise.allSettled(this.jobs);
+      throw this.storageError;
+    }
     const unfinished = this.state.runs.filter(run => ['queued', 'running', 'stopping'].includes(run.status));
     this.state.runs.forEach(run => this.stop(run.id));
     await this.idle();

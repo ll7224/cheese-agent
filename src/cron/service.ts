@@ -64,14 +64,12 @@ export class CronService {
   load(): void {
     const configs = this.store.loadJobs();
     for (const config of configs) {
-      if (config.enabled) {
         this.jobs.set(config.id, {
           config,
           timerId: null,
           consecutiveFailures: 0,
           running: false,
         });
-      }
     }
   }
 
@@ -334,4 +332,3 @@ export class CronService {
     this.store.saveJobs([...existing, ...configs]);
   }
 }
-

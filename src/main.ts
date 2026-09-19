@@ -76,6 +76,9 @@ const model = getModel(config.model);
 
 // ── 2. 工具注册中心 (Tool Registry) ──────────────────────────────
 const registry = new ToolRegistry();
+const configuredRole = config.security.defaultRole === 'developer' ? 'owner' : config.security.defaultRole;
+if (!['owner', 'collaborator', 'guest'].includes(configuredRole)) throw new Error('未知默认角色');
+registry.setRole(configuredRole as 'owner' | 'collaborator' | 'guest');
 // 注册基础文件、系统、终端操作工具
 registry.register(...allTools);
 // 注册动态工具检索器（Deferred Tools 按需发现）
@@ -88,7 +91,7 @@ memoryStore.init();
 registry.register(createMemoryTool(memoryStore));
 
 // ── 4. 向量检索与 RAG 引擎 (Vector Store & Embedder) ─────────────
-const vectorStore = new SqliteVectorStore();
+const vectorStore = new SqliteVectorStore(config.rag.enabled ? 'knowledge.db' : ':memory:');
 // 优先解析专用 DashScope 向量密钥，避免将主 LLM 的密钥混传导致 401 失败
 const ragApiKey =
   config.rag?.apiKey ||
@@ -97,7 +100,7 @@ const ragApiKey =
 const embedFn = ragApiKey
   ? createDashScopeEmbedder(ragApiKey)
   : createMockEmbedder();
-registry.register(...createRagTools(vectorStore, embedFn));
+if (config.rag.enabled) registry.register(...createRagTools(vectorStore, embedFn));
 
 /**
  * 尝试通过 MCP 协议动态连接外部服务（例如 GitHub 官方 MCP Server）
@@ -173,6 +176,7 @@ registry.register(createCronTool(cronService));
 const agentRegistry = new SubAgentRegistry({
   maxSpawnDepth: config.agents.maxSpawnDepth,
   maxConcurrent: config.agents.maxConcurrent,
+  defaultTimeout: config.agents.defaultTimeout,
 });
 
 /**
@@ -196,7 +200,7 @@ const builder = new PromptBuilder()
   .pipe('toolGuide', toolGuide())
   .pipe('deferredTools', deferredTools())
   .pipe('memoryContext', memoryContext(memoryStore))
-  .pipe('ragContext', ragContext(vectorStore))
+  .pipe('ragContext', config.rag.enabled ? ragContext(vectorStore) : () => null)
   .pipe('skillContext', () => skillLoader.buildPromptSection(activeSkills))
   .pipe('sessionContext', sessionContext());
 
@@ -209,11 +213,11 @@ const gateway = new ChannelGateway({
 
 const FEISHU_PORT = Number(process.env.FEISHU_PORT || '3000');
 const feishuChannel = new FeishuChannel({
-  appId: process.env.FEISHU_APP_ID || '',
-  appSecret: process.env.FEISHU_APP_SECRET || '',
-  port: FEISHU_PORT,
+  appId: config.channels.feishu.appId || process.env.FEISHU_APP_ID || '',
+  appSecret: config.channels.feishu.appSecret || process.env.FEISHU_APP_SECRET || '',
+  port: process.env.FEISHU_PORT ? FEISHU_PORT : config.channels.feishu.port,
 });
-gateway.register(feishuChannel);
+if (config.channels.feishu.enabled) gateway.register(feishuChannel);
 
 // ── 12. 斜杠命令派发器 (Slash Commands Dispatcher) ───────────────
 const dispatch = createDispatcher([
@@ -286,7 +290,7 @@ export async function startAgent() {
       console.log(`\n${message}`);
     },
   });
-  cronService.start();
+  if (config.cron.enabled) cronService.start();
   const cronJobs = cronService.list();
 
   // 5. 初始化本地持久化会话与计费追踪
@@ -368,12 +372,12 @@ export async function startAgent() {
   console.log('');
 
   // 8. 自动扫描与载入本地知识库文档 (docs/ 目录冷启动)
-  if (fs.existsSync('docs')) {
-    const files = fs.readdirSync('docs').filter(f => f.endsWith('.md'));
+  if (config.rag.enabled && fs.existsSync(config.rag.docsDir)) {
+    const files = fs.readdirSync(config.rag.docsDir).filter(f => f.endsWith('.md'));
     if (files.length > 0) {
       console.log(`  发现 ${files.length} 个文档，自动导入知识库...`);
       for (const f of files) {
-        const path = `docs/${f}`;
+        const path = `${config.rag.docsDir}/${f}`;
         const text = fs.readFileSync(path, 'utf-8');
         const chunks = chunkDocument(path, text);
         const embeddings = await embed(embedFn, chunks.map(c => c.text));
@@ -390,6 +394,14 @@ export async function startAgent() {
 export async function runTask(messages: ModelMessage[], options: ExecutionOptions = {}) {
   await connectMCP();
   registry.register(createSpawnTool(agentRegistry, () => ({ ...getSpawnCtx(), ...options })));
-  await agentLoop(model, registry, messages, builder.build(makePromptCtx()), undefined, options);
-  await registry.closeAllMCP();
+  if (options.manageCron) registry.register({ ...createCronTool(cronService), execute: options.manageCron });
+  try {
+    for (const plugin of config.plugins.filter(item => item.enabled)) {
+      const definition = availablePlugins.get(plugin.name);
+      if (!definition) throw new Error(`未知插件: ${plugin.name}`);
+      if (Object.values(plugin.config).some(value => !['string', 'number', 'boolean'].includes(typeof value))) throw new Error(`插件 ${plugin.name} 的配置值必须为字符串、数字或布尔值`);
+      await pluginManager.load(definition, plugin.config as Record<string, string | number | boolean>);
+    }
+    await agentLoop(model, registry, messages, builder.build(makePromptCtx()), undefined, options);
+  } finally { await registry.closeAllMCP(); await pluginManager.unloadAll(); }
 }

@@ -2,7 +2,7 @@ import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { Executor } from './service.js';
 
-export const executeWorker: Executor = ({ cwd, messages, config, emit, acquireChild, signal }) => new Promise((resolve, reject) => {
+export const executeWorker: Executor = ({ cwd, messages, config, emit, acquireChild, manageCron, signal }) => new Promise((resolve, reject) => {
   signal?.throwIfAborted();
   const extension = import.meta.url.endsWith('.ts') ? 'ts' : 'js';
   const worker = fork(fileURLToPath(new URL(`./worker.${extension}`, import.meta.url)), [], {
@@ -28,6 +28,12 @@ export const executeWorker: Executor = ({ cwd, messages, config, emit, acquireCh
   signal?.addEventListener('abort', abort, { once: true });
   worker.stderr?.on('data', chunk => { failure = (failure + chunk.toString()).slice(-4000); });
   worker.on('message', (message: any) => {
+    if (message.type === 'cron') {
+      void Promise.resolve().then(() => { signal.throwIfAborted(); return manageCron(message.input); }).then(
+        output => { if (worker.connected) worker.send({ type: 'cron-result', id: message.id, output }); },
+        error => { if (worker.connected) worker.send({ type: 'cron-result', id: message.id, error: String(error) }); },
+      );
+    }
     if (message.type === 'child-acquire') {
       void acquireChild(message.id).then(release => {
         if (exited || signal?.aborted) { release(); return; }

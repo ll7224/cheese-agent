@@ -1,7 +1,14 @@
-const pending = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
+import { randomUUID } from 'node:crypto';
+const pending = new Map<string, { resolve: (value?: any) => void; reject: (error: Error) => void }>();
 const controller = new AbortController();
 process.on('disconnect', () => process.exit(1));
 process.on('message', (message: any) => {
+  if (message.type === 'cron-result') {
+    const request = pending.get(message.id);
+    if (message.error) request?.reject(new Error(message.error));
+    else request?.resolve(message.output);
+    pending.delete(message.id);
+  }
   if (message.type === 'child-granted') { pending.get(message.id)?.resolve(); pending.delete(message.id); }
   if (message.type === 'child-denied') { pending.get(message.id)?.reject(new Error('子任务已取消')); pending.delete(message.id); }
   if (message.type === 'abort') {
@@ -18,6 +25,12 @@ process.once('message', async (request: any) => {
     const { runTask } = await import('../main.js');
     await runTask(request.messages, {
       signal: controller.signal,
+      manageCron: input => new Promise((resolve, reject) => {
+        controller.signal.throwIfAborted();
+        const id = randomUUID();
+        pending.set(id, { resolve, reject });
+        process.send?.({ type: 'cron', id, input });
+      }),
       emit: event => process.send?.({ type: 'event', event }),
       acquireChild: async id => {
         controller.signal.throwIfAborted();
