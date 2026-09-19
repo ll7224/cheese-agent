@@ -134,7 +134,10 @@ export class Runtime {
   createSession(workspaceId: string) {
     if (!this.available(this.workspace(workspaceId))) throw new RuntimeError('工作目录已不可用');
     const config = captureConfig(this.options.configDir || this.workspace(workspaceId).path, this.workspace(workspaceId).path);
-    if (this.schedulesEnabled) this.cron(workspaceId, config.values);
+    if (this.schedulesEnabled) {
+      try { this.cron(workspaceId, config.values); }
+      catch { console.warn(`目录 ${this.workspace(workspaceId).path} 的定时任务未启动，请检查目录配置；普通会话不受影响`); }
+    }
     const session: Session = { id: randomUUID(), workspaceId, title: '新会话', updatedAt: new Date().toISOString(), messages: [], config };
     this.state.sessions.push(session);
     this.save();

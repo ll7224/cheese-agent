@@ -5,6 +5,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureConfig, resolveConfig } from '../src/runtime/config.js';
 
+test('Cron storage is workspace-local unless explicitly configured in that workspace', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'cheese-cron-config-'));
+  try {
+    const project = join(directory, 'project'); mkdirSync(project);
+    for (const dataDir of ['.', join(directory, 'shared-cron')]) {
+      writeFileSync(join(directory, 'cheese-agent.config.json'), JSON.stringify({ model: { provider: 'mock' }, cron: { enabled: true, dataDir } }));
+      assert.equal(captureConfig(directory, project).values.cron.dataDir, project);
+      assert.equal(captureConfig(directory, project).values.cron.enabled, true);
+    }
+    assert.equal(captureConfig(directory, directory).values.cron.dataDir, join(directory, 'shared-cron'));
+    writeFileSync(join(project, 'cheese-agent.config.json'), JSON.stringify({ cron: { dataDir: './schedules' } }));
+    assert.equal(captureConfig(directory, project).values.cron.dataDir, join(project, 'schedules'));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('directory overrides preserve false, path origin and old session parameters without storing credentials', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cheese-config-'));
   try {

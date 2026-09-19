@@ -46,7 +46,9 @@ export function captureConfig(commonDirectory: string, workspace: string): Confi
     };
     return visit(JSON.parse(readFileSync(file, 'utf8')));
   };
-  const values = CheeseAgentConfigSchema.parse(merge(read(commonDirectory), commonDirectory === workspace ? {} : read(workspace)));
+  const common = read(commonDirectory);
+  if (commonDirectory !== workspace && object(common.cron)) delete common.cron.dataDir;
+  const values = CheeseAgentConfigSchema.parse(merge(common, commonDirectory === workspace ? {} : read(workspace)));
   values.memory.dataDir = resolve(workspace, values.memory.dataDir);
   values.cron.dataDir = resolve(workspace, values.cron.dataDir);
   values.rag.docsDir = resolve(workspace, values.rag.docsDir);
