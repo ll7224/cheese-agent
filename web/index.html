@@ -1,62 +1,254 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0c1210"><title>Cheese — 让想法开始发生</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0c100e">
+  <title>Cheese Agent — 本机开发工作台</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <div class="shell">
     <aside class="sidebar" id="sidebar" aria-label="会话导航">
-      <a class="brand" href="#"><span class="brand-mark" aria-hidden="true">c<span>·</span></span><span>cheese<span class="brand-sub">AGENT WORKSPACE</span></span></a>
-      <button class="new-task" id="new-task"><span>＋</span> 开始新任务 <kbd>↵</kbd></button>
-      <div class="section-label">WORKSPACE <span>工作目录</span></div>
-      <label class="workspace-select"><span class="folder-icon" aria-hidden="true">▱</span><select id="workspaces" aria-label="选择工作目录"></select></label>
-      <button class="text-button" id="add-workspace">＋ 接入本机文件夹</button>
-      <div class="section-label recent-label">RECENT <span>最近会话</span></div>
-      <nav id="sessions" aria-label="最近会话"></nav>
-      <button class="text-button" id="load-more" hidden>显示更多会话 ↓</button>
-      <div class="sidebar-bottom"><span class="status-dot"></span><span>在你的电脑上运行<small>LOCAL ENVIRONMENT</small></span><span class="version">v1.0</span></div>
+      <a class="brand" href="#" aria-label="Cheese Agent">
+        <span class="brand-mark" aria-hidden="true">🧀</span>
+        <span class="brand-info">
+          <span class="brand-name">Cheese</span>
+          <span class="brand-sub">LOCAL AGENT</span>
+        </span>
+      </a>
+
+      <button class="new-task" id="new-task" type="button">
+        <span class="new-task-icon">＋</span>
+        <span>新建任务</span>
+        <kbd class="shortcut-key">↵</kbd>
+      </button>
+
+      <div class="nav-section">
+        <div class="section-label">
+          <span>工作目录</span>
+          <span class="label-tag">WORKSPACE</span>
+        </div>
+        <label class="workspace-select">
+          <span class="folder-icon" aria-hidden="true">📁</span>
+          <select id="workspaces" aria-label="选择工作目录"></select>
+        </label>
+        <button class="text-button" id="add-workspace" type="button">＋ 接入本机文件夹</button>
+      </div>
+
+      <div class="nav-section recent-section">
+        <div class="section-label">
+          <span>最近会话</span>
+          <span class="label-tag">RECENT</span>
+        </div>
+        <nav id="sessions" class="sessions-list" aria-label="最近会话"></nav>
+        <button class="text-button" id="load-more" type="button" hidden>显示更多会话 ↓</button>
+      </div>
+
+      <div class="sidebar-bottom">
+        <div class="env-info">
+          <span class="status-dot"></span>
+          <span>本机环境已就绪</span>
+        </div>
+        <span class="version-tag">v1.0.0</span>
+      </div>
     </aside>
+
     <div class="main-column">
       <header class="topbar">
         <button class="icon-button" id="toggle-sidebar" aria-label="切换会话导航" aria-expanded="true" aria-controls="sidebar">☰</button>
-        <div class="breadcrumb"><a href="#">工作空间</a><span>/</span><span id="breadcrumb">总览</span></div>
-        <span class="connection" id="connection" role="status"><span class="status-dot"></span> 本机已连接</span>
-        <button class="icon-button" id="toggle-details" aria-label="切换执行详情" aria-controls="inspector" aria-expanded="false" hidden>执行详情 ↗</button>
+        <div class="breadcrumb">
+          <span class="crumb-root">工作空间</span>
+          <span class="crumb-separator">/</span>
+          <span class="crumb-current" id="breadcrumb">总览</span>
+        </div>
+        <div class="topbar-right">
+          <span class="connection" id="connection" role="status">
+            <span class="status-dot"></span>
+            <span>本机已连接</span>
+          </span>
+          <button class="icon-button details-button" id="toggle-details" aria-label="切换执行详情" aria-controls="inspector" aria-expanded="false" hidden>
+            <span>执行日志</span>
+            <span aria-hidden="true">↗</span>
+          </button>
+        </div>
       </header>
+
       <main id="workspace-main">
         <div class="content">
           <section class="hero" id="hero" aria-labelledby="home-title">
-            <div class="hero-copy"><div class="eyebrow"><span></span> YOUR IDEAS. IN MOTION.</div><h1 id="home-title">把想法，<br>交给<span>智能。</span></h1><p>从一个念头，到下一步行动。<br>你的 Agent 已就绪，随时一起探索。</p><div class="hero-meta"><span>01 / 本机工作台</span><span class="thin-line"></span><span>为专注而生</span></div></div>
-            <div class="orb-stage" aria-hidden="true"><div class="orb-halo"></div><canvas id="orb"></canvas><div class="orb-caption"><span class="crosshair">＋</span><span>COGNITIVE CORE<br><strong id="core-status">SYSTEM READY</strong></span><span class="orb-coordinate">● 001</span></div></div>
+            <div class="hero-container">
+              <div class="hero-text">
+                <div class="hero-status-pill">
+                  <span class="status-dot"></span>
+                  <span id="core-status">SYSTEM READY</span>
+                </div>
+                <h1 id="home-title">把想法，交给 <span>Cheese Agent</span></h1>
+                <p class="hero-description">
+                  连接本机项目目录，发起多步骤工程任务。实时观测模型思考、工具调用与代码构建过程。
+                </p>
+              </div>
+              <div class="hero-radar-card" aria-hidden="true">
+                <canvas id="orb" width="140" height="140"></canvas>
+                <div class="radar-footer">
+                  <span class="radar-dot"></span>
+                  <span>ENGINE CORE</span>
+                </div>
+              </div>
+            </div>
           </section>
-          <section id="conversation" hidden aria-label="当前对话"><div class="conversation-heading"><span class="eyebrow">AGENT SESSION</span><h1 id="session-title"></h1><div id="session-meta"></div></div><div id="messages"></div><article class="message assistant live-message" id="live" hidden><div class="message-author"><span class="mini-core"></span> CHEESE <span>正在输出</span></div><div id="live-text" class="message-content" aria-live="polite"></div></article></section>
+
+          <section id="conversation" hidden aria-label="当前对话">
+            <div class="conversation-heading">
+              <div class="conversation-meta-row">
+                <h1 id="session-title">会话</h1>
+              </div>
+              <div id="session-meta"></div>
+            </div>
+            <div id="messages" class="messages-container"></div>
+            <article class="message assistant live-message" id="live" hidden>
+              <div class="message-author">
+                <span class="assistant-avatar">🧀</span>
+                <span class="author-name">CHEESE</span>
+                <span class="typing-status">正在生成回复…</span>
+              </div>
+              <div id="live-text" class="message-content markdown-body" aria-live="polite"></div>
+            </article>
+          </section>
+
           <div id="notice" class="notice" hidden></div>
+
           <section class="composer-area" aria-label="发起任务">
-            <form id="composer"><label class="sr-only" for="prompt">描述你的任务</label><textarea id="prompt" rows="3" placeholder="描述你的目标，剩下的交给 Cheese…" required></textarea><div class="composer-toolbar"><span id="model-label"><span class="mini-core"></span> Agent</span><span id="directory-label" title="任务工作目录"></span><button id="stop" type="button" class="stop-button" hidden>停止任务</button><button id="send" class="send-button" type="submit"><span id="send-label">开始任务</span><span aria-hidden="true">↗</span></button></div></form>
-            <div class="composer-hint"><span>⌘ / Ctrl + Enter 发送 · Enter 换行</span><span id="run-status">准备好开始了</span></div>
+            <form id="composer" class="composer-form">
+              <label class="sr-only" for="prompt">描述你的任务</label>
+              <textarea id="prompt" rows="3" placeholder="描述你想要实现的目标、重构的代码或排查的问题…" required></textarea>
+              <div class="composer-toolbar">
+                <div class="toolbar-badges">
+                  <span id="model-label" class="badge-capsule">
+                    <span class="mini-core"></span>
+                    <span>Agent</span>
+                  </span>
+                  <span id="directory-label" class="badge-capsule directory-capsule" title="任务工作目录"></span>
+                </div>
+                <div class="toolbar-actions">
+                  <button id="stop" type="button" class="stop-button" hidden>停止任务</button>
+                  <button id="send" class="send-button" type="submit">
+                    <span id="send-label">开始任务</span>
+                    <span aria-hidden="true">↵</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+            <div class="composer-hint">
+              <span class="shortcut-tip"><kbd>⌘/Ctrl + Enter</kbd> 发送 · <kbd>Enter</kbd> 换行</span>
+              <span id="run-status" class="run-status-text">准备好开始了</span>
+            </div>
             <p id="error" class="error" role="alert" hidden></p>
           </section>
-          <section class="home-bottom" id="home-bottom"><div class="quick-prompts"><button data-prompt="帮我梳理这个项目的架构和关键模块"><span>⌘</span> 理解一个项目 <span>↗</span></button><button data-prompt="帮我调查并分析这个问题："><span>◎</span> 深入探索问题 <span>↗</span></button><button data-prompt="帮我制定一个可执行的计划："><span>▤</span> 把想法变成计划 <span>↗</span></button></div><div class="system-overview"><div><span class="section-label">RUNTIME / 运行概览</span><p>多个任务，同步向前。</p></div><div class="metric"><strong id="main-count">0<span>/ 3</span></strong><span>主任务运行中</span></div><div class="metric"><strong id="child-count">0<span>/ 3</span></strong><span>子 Agent 运行中</span></div><div class="metric"><strong id="queued-count">0</strong><span>任务等待中</span></div></div></section>
-          <footer><span>CHEESE AGENT</span><span>保持好奇，让下一步发生。 <span class="footer-star">✳</span></span></footer>
+
+          <section class="home-bottom" id="home-bottom">
+            <div class="quick-prompts-heading">常用任务推荐</div>
+            <div class="quick-prompts">
+              <button data-prompt="帮我梳理当前工作区的项目架构、关键模块与依赖关系" class="prompt-card" type="button">
+                <div class="card-header">
+                  <span class="card-icon">🧭</span>
+                  <span class="card-arrow">↗</span>
+                </div>
+                <strong class="card-title">架构理解</strong>
+                <span class="card-desc">梳理模块组织、入口调用与核心数据流</span>
+              </button>
+              <button data-prompt="检查当前工作区未提交的代码改动并进行审查" class="prompt-card" type="button">
+                <div class="card-header">
+                  <span class="card-icon">🔍</span>
+                  <span class="card-arrow">↗</span>
+                </div>
+                <strong class="card-title">代码审查</strong>
+                <span class="card-desc">对比 Git 改动，排查逻辑漏洞与设计缺陷</span>
+              </button>
+              <button data-prompt="为当前项目编写完整的自动化测试并验证通过" class="prompt-card" type="button">
+                <div class="card-header">
+                  <span class="card-icon">🧪</span>
+                  <span class="card-arrow">↗</span>
+                </div>
+                <strong class="card-title">测试补充</strong>
+                <span class="card-desc">生成关键函数单测并实际执行验证</span>
+              </button>
+              <button data-prompt="帮我制定一份可落地的重构计划并分步执行" class="prompt-card" type="button">
+                <div class="card-header">
+                  <span class="card-icon">⚡</span>
+                  <span class="card-arrow">↗</span>
+                </div>
+                <strong class="card-title">重构推进</strong>
+                <span class="card-desc">消除坏味道，提升模块化与工程可维护性</span>
+              </button>
+            </div>
+
+            <div class="system-overview">
+              <div class="overview-intro">
+                <span class="overview-title">调度与并发状态</span>
+                <p class="overview-desc">主任务独立调度，子 Agent 并行推进，文件共享操作。</p>
+              </div>
+              <div class="metrics-grid">
+                <div class="metric">
+                  <strong id="main-count">0<span>/ 3</span></strong>
+                  <span class="metric-label">主任务运行中</span>
+                </div>
+                <div class="metric">
+                  <strong id="child-count">0<span>/ 3</span></strong>
+                  <span class="metric-label">子 Agent 运行中</span>
+                </div>
+                <div class="metric">
+                  <strong id="queued-count">0</strong>
+                  <span class="metric-label">任务排队中</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <footer class="workbench-footer">
+            <span class="footer-brand">CHEESE AGENT WORKBENCH</span>
+            <span class="footer-tip">保持专注，让构建顺畅发生。</span>
+          </footer>
         </div>
-        <aside id="inspector" class="inspector" hidden aria-label="执行详情"><div class="inspector-heading"><span>执行时间线<small>EXECUTION LOG</small></span><button class="icon-button" id="close-details" aria-label="关闭执行详情">×</button></div><p class="inspector-hint">工具调用与子任务的实际执行记录。</p><div id="events"></div></aside>
+
+        <aside id="inspector" class="inspector" hidden aria-label="执行详情">
+          <div class="inspector-heading">
+            <div class="inspector-title">
+              <span>执行详情</span>
+              <span class="inspector-badge">EXECUTION TIMELINE</span>
+            </div>
+            <button class="icon-button" id="close-details" aria-label="关闭执行详情" type="button">✕</button>
+          </div>
+          <p class="inspector-hint">记录工具调用、子任务派生与运行时日志。</p>
+          <div id="events" class="events-list"></div>
+        </aside>
       </main>
     </div>
   </div>
+
   <dialog id="directory-dialog" aria-labelledby="directory-title">
-    <div class="dialog-heading"><span class="eyebrow">CONNECT WORKSPACE</span><button class="icon-button" type="button" id="close-directory" aria-label="关闭目录弹窗">×</button></div>
-    <h2 id="directory-title">接入你的工作目录</h2>
-    <p>选择已存在的本机文件夹。每个会话会固定在所选目录中工作。</p>
-    <button class="send-button directory-picker" type="button" id="pick-directory">选择本地文件夹 ↗</button>
+    <div class="dialog-heading">
+      <span class="dialog-badge">工作区管理</span>
+      <button class="icon-button" type="button" id="close-directory" aria-label="关闭目录弹窗">✕</button>
+    </div>
+    <h2 id="directory-title">接入本机工作目录</h2>
+    <p class="dialog-desc">选择你电脑上的代码仓库或文件夹。Agent 会在该目录中读取文件、运行终端命令并持续迭代。</p>
+    <button class="send-button directory-picker" type="button" id="pick-directory">
+      <span>📂 打开本地文件夹选择器</span>
+      <span aria-hidden="true">↗</span>
+    </button>
     <p id="directory-status" role="status" aria-live="polite"></p>
-    <details id="directory-manual"><summary>手动输入路径</summary><form id="directory-form">
-      <label for="directory-path">文件夹绝对路径</label><input id="directory-path" placeholder="/Users/you/projects/my-project" required autocomplete="off">
-      <button class="send-button" id="connect-directory" type="submit">接入目录 ↗</button>
-    </form></details>
+    <details id="directory-manual">
+      <summary>或者手动输入绝对路径</summary>
+      <form id="directory-form">
+        <label for="directory-path">文件夹绝对路径</label>
+        <input id="directory-path" placeholder="/Users/username/projects/my-app" required autocomplete="off">
+        <button class="send-button" id="connect-directory" type="submit">接入目录 ↗</button>
+      </form>
+    </details>
     <p id="directory-error" class="error" role="alert"></p>
   </dialog>
+
   <script type="module" src="/app.js"></script>
 </body>
 </html>
