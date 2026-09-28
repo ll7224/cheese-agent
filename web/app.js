@@ -519,6 +519,35 @@ document.addEventListener('keydown', event => {
 });
 if (matchMedia('(max-width:850px)').matches) setSidebar(false);
 matchMedia('(max-width:850px)').addEventListener('change', event => setSidebar(!event.matches));
+/* --- Theme Management (Impeccable Kinpaku Light & Instrument Dark) --- */
+const themeToggle = element('theme-toggle');
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem('cheese.theme', theme);
+  if (themeToggle) {
+    const isDark = theme === 'dark';
+    const icon = themeToggle.querySelector('.theme-icon');
+    const text = themeToggle.querySelector('.theme-text');
+    if (icon) icon.textContent = isDark ? '🌙' : '☀️';
+    if (text) text.textContent = isDark ? '仪器暗色' : '和纸白';
+    themeToggle.setAttribute('aria-label', isDark ? '切换至和纸白主题' : '切换至仪器暗色主题');
+    themeToggle.setAttribute('title', isDark ? '切换至和纸白主题' : '切换至仪器暗色主题');
+  }
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) metaTheme.content = theme === 'dark' ? '#141518' : '#f8f8fa';
+}
+
+const savedTheme = localStorage.getItem('cheese.theme') || 'light';
+applyTheme(savedTheme);
+
+if (themeToggle) {
+  themeToggle.onclick = () => {
+    const current = document.documentElement.dataset.theme;
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+    if (typeof startOrb === 'function') startOrb();
+  };
+}
+
 setInterval(refresh, 2000);
 changeRoute();
 
@@ -548,8 +577,9 @@ if (canvas) {
     const center = size / 2;
     const scale = size * 0.36;
     const rotation = reducedMotion.matches ? 0.6 : time * 0.0001;
+    const isDark = document.documentElement.dataset.theme === 'dark';
 
-    context.strokeStyle = 'rgba(74, 222, 128, 0.15)';
+    context.strokeStyle = isDark ? 'rgba(242, 180, 59, 0.25)' : 'rgba(194, 125, 5, 0.3)';
     context.lineWidth = 0.8;
     context.beginPath();
     context.ellipse(center, center, scale * 1.25, scale * 0.4, -0.4, 0, Math.PI * 2);
@@ -564,7 +594,9 @@ if (canvas) {
     for (const [h, v, d] of transformed) {
       const perspective = 2.4 / (2.4 - d * 0.3);
       const alpha = 0.2 + (d + 1) * 0.35;
-      context.fillStyle = `rgba(74, 222, 128, ${Math.min(0.9, alpha)})`;
+      context.fillStyle = isDark
+        ? `rgba(242, 180, 59, ${Math.min(0.92, alpha)})`
+        : `rgba(184, 116, 5, ${Math.min(0.92, alpha)})`;
       context.beginPath();
       context.arc(center + h * scale * perspective, center + v * scale * perspective, d > 0.5 ? 1.2 : 0.7, 0, Math.PI * 2);
       context.fill();
