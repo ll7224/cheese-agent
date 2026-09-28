@@ -1033,14 +1033,21 @@ document.addEventListener('click', event => {
   if (!wrapper) closeModelPopover();
 });
 
-function openModelDialog(modelToEditId) {
+async function openModelDialog(modelToEditId) {
   closeModelPopover();
   const dialog = element('model-dialog');
   if (!dialog) return;
   dialog.showModal();
+  if (modelsList.length === 0) {
+    await loadModels();
+  }
   renderModelDialogList();
-  if (modelToEditId) {
-    selectModelForEditing(modelToEditId);
+
+  const targetId = modelToEditId ||
+    (modelsList.find(m => m.id === selectedModelId) || modelsList.find(m => m.isDefault) || modelsList[0])?.id;
+
+  if (targetId) {
+    selectModelForEditing(targetId);
   } else {
     resetModelForm(element('model-provider-select')?.value || 'deepseek');
   }
@@ -1482,7 +1489,12 @@ element('delete-model-btn')?.addEventListener('click', async () => {
       localStorage.removeItem('cheese.activeModelName');
     }
     await loadModels();
-    resetModelForm();
+    const nextModel = modelsList.find(m => m.id === selectedModelId) || modelsList.find(m => m.isDefault) || modelsList[0];
+    if (nextModel) {
+      selectModelForEditing(nextModel.id);
+    } else {
+      resetModelForm();
+    }
     renderControls();
   } catch (err) {
     showTestStatus('error', `删除失败: ${err.message}`);
