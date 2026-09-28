@@ -5,6 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f8f8fa">
   <title>Cheese Agent — 本机开发工作台</title>
+  <script>
+    (function() {
+      try {
+        var mode = localStorage.getItem('cheese.theme.mode') || 'auto';
+        var h = new Date().getHours();
+        var theme = mode === 'auto' ? (h >= 6 && h < 18 ? 'light' : 'dark') : mode;
+        document.documentElement.dataset.theme = theme;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.content = theme === 'dark' ? '#141518' : '#f8f8fa';
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -108,8 +120,18 @@
               <div class="message-author">
                 <span class="assistant-avatar">🧀</span>
                 <span class="author-name">CHEESE</span>
-                <span class="typing-status">正在生成回复…</span>
+                <span id="live-model-badge" class="message-model-badge"></span>
+                <span id="live-status" class="typing-status">正在准备…</span>
               </div>
+              <div id="live-reasoning" class="live-reasoning-container" hidden>
+                <div class="live-reasoning-header">
+                  <span class="live-reasoning-icon">💭</span>
+                  <span id="live-reasoning-title" class="live-reasoning-title">思考与推理过程</span>
+                  <span class="live-reasoning-pulse"></span>
+                </div>
+                <div id="live-reasoning-text" class="live-reasoning-content markdown-body"></div>
+              </div>
+              <div id="live-tool-status" class="live-tool-status" hidden></div>
               <div id="live-text" class="message-content markdown-body" aria-live="polite"></div>
             </article>
           </section>

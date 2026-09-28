@@ -44,6 +44,71 @@ const TOKEN_BUDGET = 500000;
  * @param system - 最终组装完成的系统提示词
  * @param tracker - 可选的 Token 计量与成本跟踪器
  */
+/**
+ * 过滤与提取流式文本中的 <think>...</think> 标签
+ */
+function createThinkingFilter(
+  onText: (text: string) => void,
+  onReasoning: (text: string) => void
+) {
+  let inThink = false;
+  let buffer = '';
+
+  return {
+    push(chunk: string) {
+      buffer += chunk;
+      while (buffer.length > 0) {
+        if (!inThink) {
+          const thinkIndex = buffer.indexOf('<think>');
+          if (thinkIndex !== -1) {
+            const before = buffer.slice(0, thinkIndex);
+            if (before) onText(before);
+            inThink = true;
+            buffer = buffer.slice(thinkIndex + 7);
+          } else {
+            const partial = buffer.match(/<t?(h?(i?(n?(k)?)?)?)?$/);
+            if (partial && partial.index !== undefined && buffer.length - partial.index < 7) {
+              const safe = buffer.slice(0, partial.index);
+              if (safe) onText(safe);
+              buffer = buffer.slice(partial.index);
+              break;
+            } else {
+              onText(buffer);
+              buffer = '';
+            }
+          }
+        } else {
+          const endThinkIndex = buffer.indexOf('</think>');
+          if (endThinkIndex !== -1) {
+            const before = buffer.slice(0, endThinkIndex);
+            if (before) onReasoning(before);
+            inThink = false;
+            buffer = buffer.slice(endThinkIndex + 8);
+          } else {
+            const partial = buffer.match(/<\/?t?(h?(i?(n?(k)?)?)?)?$/);
+            if (partial && partial.index !== undefined && buffer.length - partial.index < 8) {
+              const safe = buffer.slice(0, partial.index);
+              if (safe) onReasoning(safe);
+              buffer = buffer.slice(partial.index);
+              break;
+            } else {
+              onReasoning(buffer);
+              buffer = '';
+            }
+          }
+        }
+      }
+    },
+    flush() {
+      if (buffer) {
+        if (inThink) onReasoning(buffer);
+        else onText(buffer);
+        buffer = '';
+      }
+    }
+  };
+}
+
 export async function agentLoop(
   model: any,
   registry: ToolRegistry,
@@ -89,14 +154,41 @@ export async function agentLoop(
           },
         });
 
+        const thinkingFilter = createThinkingFilter(
+          (text) => {
+            options.emit?.({ type: 'text', text, step, attempt });
+            process.stdout.write(text);
+            fullText += text;
+          },
+          (reasoningText) => {
+            options.emit?.({ type: 'reasoning', text: reasoningText, step, attempt });
+          }
+        );
+
         // 消费实时流式分块
         for await (const part of result.fullStream) {
           switch (part.type) {
-            // 文本增量生成（即时打印打字机效果）
+            // 推理过程事件处理（支持 OpenAI o1/o3、DeepSeek-R1、Gemini Thinking 等）
+            case 'reasoning-start':
+              options.emit?.({ type: 'reasoning-start', step, attempt });
+              break;
+
+            case 'reasoning-delta':
+            case 'reasoning' as any: {
+              const text = (part as any).text || (part as any).textDelta || (part as any).delta || '';
+              if (text) {
+                options.emit?.({ type: 'reasoning', text, step, attempt });
+              }
+              break;
+            }
+
+            case 'reasoning-end':
+              options.emit?.({ type: 'reasoning-end', step, attempt });
+              break;
+
+            // 文本增量生成（即时打印打字机效果，内置 <think> 标签过滤拦截）
             case 'text-delta':
-              options.emit?.({ type: 'text', text: part.text, step, attempt });
-              process.stdout.write(part.text);
-              fullText += part.text;
+              thinkingFilter.push(part.text);
               break;
 
             // 工具调用发起
@@ -150,9 +242,36 @@ export async function agentLoop(
           }
         }
 
+        thinkingFilter.flush();
+
         // 等待当前步完整响应元数据
         stepResponse = await result.response;
         stepUsage = await result.usage;
+
+        // 若 assistant message 中包含 <think> 标签，提纯内容并挂载 reasoning
+        if (stepResponse?.messages) {
+          for (const msg of stepResponse.messages) {
+            if (msg.role === 'assistant') {
+              if (typeof msg.content === 'string') {
+                const match = msg.content.match(/<think>([\s\S]*?)<\/think>/);
+                if (match) {
+                  (msg as any).reasoning = match[1].trim();
+                  msg.content = msg.content.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+                }
+              } else if (Array.isArray(msg.content)) {
+                for (const item of msg.content) {
+                  if (item.type === 'text' && typeof item.text === 'string') {
+                    const match = item.text.match(/<think>([\s\S]*?)<\/think>/);
+                    if (match) {
+                      (msg as any).reasoning = ((msg as any).reasoning ? (msg as any).reasoning + '\n' : '') + match[1].trim();
+                      item.text = item.text.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
         break; // 成功完成当前 Step，跳出重试循环
       } catch (error) {
         options.signal?.throwIfAborted();

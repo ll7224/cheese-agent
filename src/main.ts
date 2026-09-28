@@ -14,7 +14,7 @@ import { MCPClient } from './tools/mcp-client.js';
 import { executeAgent as agentLoop } from './runtime/execution.js';
 import { SessionStore } from './session/store.js';
 import {
-  PromptBuilder, coreRules, toolGuide, deferredTools, sessionContext,
+  PromptBuilder, coreRules, toolGuide, deferredTools, sessionContext, modelIdentity,
   type PromptContext,
 } from './context/prompt-builder.js';
 import { estimateMessageTokens } from './context/defense.js';
@@ -197,6 +197,7 @@ registry.register(createSpawnTool(agentRegistry, getSpawnCtx));
 // ── 10. 系统提示词管道装配 (Prompt Pipeline Builder) ──────────────
 const builder = new PromptBuilder()
   .pipe('coreRules', coreRules())
+  .pipe('modelIdentity', modelIdentity())
   .pipe('toolGuide', toolGuide())
   .pipe('deferredTools', deferredTools())
   .pipe('memoryContext', memoryContext(memoryStore))
@@ -243,6 +244,8 @@ function makePromptCtx(): PromptContext {
     deferredToolSummary: registry.getDeferredToolSummary(),
     sessionMessageCount: 0,
     sessionId: config.session.id,
+    modelName: config.model?.name || process.env.MODEL_NAME,
+    provider: config.model?.provider || process.env.MODEL_PROVIDER,
   };
 }
 

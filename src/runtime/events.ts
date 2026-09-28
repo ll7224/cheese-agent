@@ -23,8 +23,8 @@ export function redactStream(secrets: string[], emit: (event: AgentEvent) => voi
   const values = secrets.filter(secret => secret.length > 3).sort((left, right) => right.length - left.length);
   return {
     push(event: AgentEvent) {
-      if (event.type !== 'text' || typeof event.text !== 'string') { emit(event); return; }
-      const key = JSON.stringify([event.childRunId, event.step, event.attempt]);
+      if ((event.type !== 'text' && event.type !== 'reasoning') || typeof event.text !== 'string') { emit(event); return; }
+      const key = JSON.stringify([event.type, event.childRunId, event.step, event.attempt]);
       const text = String(pending.get(key)?.text || '') + event.text;
       const safe = redact(text, values);
       let retained = 0;
@@ -49,4 +49,8 @@ export function partialText(events: AgentEvent[]): string {
   const attempts = new Map<unknown, number>();
   for (const event of events) if (!event.childRunId && (event.type === 'text' || event.type === 'retry')) attempts.set(event.step, Math.max(attempts.get(event.step) || 0, Number(event.attempt || 1) + (event.type === 'retry' ? 1 : 0)));
   return events.filter(event => !event.childRunId && event.type === 'text' && Number(event.attempt || 1) === attempts.get(event.step)).map(event => String(event.text || '')).join('');
+}
+
+export function partialReasoning(events: AgentEvent[]): string {
+  return events.filter(event => !event.childRunId && event.type === 'reasoning').map(event => String(event.text || '')).join('');
 }

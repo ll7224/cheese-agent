@@ -169,6 +169,77 @@ test('Multi-model API configuration saves enabled models and resolves composite 
     assert.equal(session.config.values.model.name, 'gemini-2.5-pro');
     assert.equal(session.config.values.model.baseURL, 'https://proxy.antigravity.internal/v1');
     assert.match(session.config.values.model.apiKey, /^credential:/);
+
+    // 4. Update session model dynamically
+    const updateRes = await app.request(`/api/v1/sessions/${session.id}/model`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        modelId: `${config.id}:claude-sonnet-4-6`
+      })
+    });
+    assert.equal(updateRes.status, 200);
+    const updated = await updateRes.json() as any;
+    assert.equal(updated.modelId, `${config.id}:claude-sonnet-4-6`);
+    assert.equal(updated.config.values.model.name, 'claude-sonnet-4-6');
+
+    // 5. Verify persisted session in runtime
+    const persisted = runtime.session(session.id);
+    assert.equal(persisted.modelId, `${config.id}:claude-sonnet-4-6`);
+    assert.equal(persisted.config.values.model.name, 'claude-sonnet-4-6');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Assistant messages record reasoning events and bound model name', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cheese-reasoning-test-'));
+  try {
+    const runtime = new Runtime(dir, async ({ messages, emit }) => {
+      emit({ type: 'reasoning', text: 'Step 1: Analyzing user query...' });
+      emit({ type: 'reasoning', text: ' Step 2: Formulating output.' });
+      emit({ type: 'text', text: 'Hello! I am Claude Sonnet.' });
+      messages.push({ role: 'assistant', content: 'Hello! I am Claude Sonnet.' });
+      return messages;
+    }, { configDir: dir, modelDir: dir });
+    const app = createApp(runtime);
+
+    const ws = runtime.addWorkspace(dir);
+    // Add model
+    runtime.modelStore.saveModel({
+      label: 'Claude 3.7',
+      provider: 'anthropic',
+      name: 'claude-3-7-sonnet',
+      baseURL: 'https://api.test.com/v1',
+      apiKey: 'sk-test-key-123',
+      isDefault: true
+    });
+
+    const sessionRes = await app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspaceId: ws.id })
+    });
+    const session = await sessionRes.json() as any;
+
+    // Submit task
+    const runRes = await app.request(`/api/v1/sessions/${session.id}/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Who are you?', key: 'k1' })
+    });
+    assert.equal(runRes.status, 202);
+
+    // Wait for run completion
+    while (runtime.state.runs.some(r => r.sessionId === session.id && ['queued', 'running'].includes(r.status))) {
+      await new Promise(r => setTimeout(r, 20));
+    }
+
+    const updatedSession = runtime.session(session.id);
+    const lastMsg = updatedSession.messages[updatedSession.messages.length - 1] as any;
+    assert.equal(lastMsg.role, 'assistant');
+    assert.equal(lastMsg.model, 'claude-3-7-sonnet');
+    assert.equal(lastMsg.reasoning, 'Step 1: Analyzing user query... Step 2: Formulating output.');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

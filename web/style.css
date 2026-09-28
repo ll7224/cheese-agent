@@ -925,6 +925,195 @@ summary:focus-visible {
   50% { opacity: 1; }
 }
 
+/* Model Badge Above Answer */
+.message-model-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  padding: 1px 8px;
+  border-radius: 9999px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  vertical-align: middle;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.message-model-badge:hover {
+  border-color: var(--border-hover);
+  color: var(--text-secondary);
+}
+
+/* Collapsible Reasoning Block in Historical Messages */
+.reasoning-block {
+  margin: 4px 0 10px 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-elevated);
+  overflow: hidden;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.reasoning-block:hover {
+  border-color: var(--border-hover);
+}
+
+.reasoning-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  list-style: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.reasoning-summary::-webkit-details-marker {
+  display: none;
+}
+
+.reasoning-summary:hover {
+  color: var(--text-secondary);
+}
+
+.reasoning-icon {
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.reasoning-title {
+  flex: 1;
+}
+
+.reasoning-arrow {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.reasoning-block[open] .reasoning-arrow {
+  transform: rotate(180deg);
+}
+
+.reasoning-content {
+  padding: 10px 14px 14px 14px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.reasoning-content p {
+  margin: 4px 0;
+}
+
+/* Live Streaming Reasoning Block */
+.live-reasoning-container {
+  margin: 6px 0 12px 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent);
+  background: var(--bg-surface-elevated);
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(212, 160, 23, 0.15);
+  animation: border-glow 2.5s infinite ease-in-out;
+}
+
+@keyframes border-glow {
+  0%, 100% { border-color: rgba(212, 160, 23, 0.35); }
+  50% { border-color: rgba(212, 160, 23, 0.8); }
+}
+
+.live-reasoning-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(212, 160, 23, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.live-reasoning-icon {
+  font-size: 13px;
+}
+
+.live-reasoning-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse-dot 1.2s infinite ease-in-out;
+  margin-left: auto;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(0.8); opacity: 0.4; }
+  50% { transform: scale(1.3); opacity: 1; }
+}
+
+.live-reasoning-content {
+  padding: 10px 14px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--bg-hover);
+}
+
+.live-tool-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-elevated);
+  border: 1px dashed var(--border-hover);
+}
+
+.live-thinking-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  color: var(--text-muted);
+  font-size: 13px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+
+.live-thinking-spinner {
+  display: inline-block;
+  animation: spin-pulse 2s infinite linear;
+}
+
+@keyframes spin-pulse {
+  0% { transform: rotate(0deg); opacity: 0.6; }
+  50% { transform: rotate(180deg); opacity: 1; }
+  100% { transform: rotate(360deg); opacity: 0.6; }
+}
+
 .message-content {
   line-height: 1.8;
   font-size: 14px;

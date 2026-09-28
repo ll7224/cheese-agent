@@ -5,7 +5,7 @@ import type { ModelMessage } from 'ai';
 import { executeWorker } from './worker-client.js';
 import { captureConfig, resolveConfig, type ConfigSnapshot } from './config.js';
 import { EventEmitter } from 'node:events';
-import { redact, redactStream, collectSecrets, partialText, type AgentEvent, type ExecutionEvent } from './events.js';
+import { redact, redactStream, collectSecrets, partialText, partialReasoning, type AgentEvent, type ExecutionEvent } from './events.js';
 import { Pool } from './pool.js';
 import { CronService } from '../cron/service.js';
 import { createCronTool } from '../tools/cron-tools.js';
@@ -168,6 +168,26 @@ export class Runtime {
     return session;
   }
 
+  updateSessionModel(sessionId: string, modelId: string): Session {
+    const session = this.session(sessionId);
+    if (!this.available(this.workspace(session.workspaceId))) throw new RuntimeError('工作目录已不可用');
+    if (this.state.runs.some(r => r.sessionId === sessionId && ['queued', 'running', 'stopping'].includes(r.status))) {
+      throw new RuntimeError('会话正在执行任务，请等待完成后再切换模型', 409);
+    }
+    const selectedModel = this.modelStore.resolveModel(modelId);
+    if (!selectedModel) throw new RuntimeError('指定的模型不存在或不可用', 404);
+    const config = captureConfig(
+      this.options.configDir || this.workspace(session.workspaceId).path,
+      this.workspace(session.workspaceId).path,
+      selectedModel
+    );
+    session.config = config;
+    session.modelId = modelId;
+    session.updatedAt = new Date().toISOString();
+    this.save();
+    return session;
+  }
+
   session(id: string) {
     const session = this.state.sessions.find(item => item.id === id);
     if (!session) throw new RuntimeError('会话不存在', 404);
@@ -282,7 +302,19 @@ export class Runtime {
       const config = session.config ? resolveConfig(session.config) : undefined;
       secrets = collectSecrets(config);
       stream = redactStream(secrets, event => this.emit(run, { ...event, ...(event.childRunId ? { rootRunId: run.id, parentRunId: run.id } : {}) }, secrets));
-      session.messages = redact(await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, emit: event => stream!.push(event), acquireChild: () => this.children.acquire(controller.signal), manageCron: input => { controller.signal.throwIfAborted(); return this.manageCron(workspace.id, input, config); }, signal: controller.signal }), secrets);
+      const resultMessages = await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, emit: event => stream!.push(event), acquireChild: () => this.children.acquire(controller.signal), manageCron: input => { controller.signal.throwIfAborted(); return this.manageCron(workspace.id, input, config); }, signal: controller.signal });
+      const currentModelName = config?.model?.name || session.config?.values?.model?.name;
+      const reasoningEvents = this.events(run.id).filter(e => e.type === 'reasoning');
+      const reasoningText = reasoningEvents.map(e => String(e.text || '')).join('');
+
+      for (let i = session.messages.length; i < resultMessages.length; i++) {
+        const msg = resultMessages[i] as any;
+        if (msg.role === 'assistant') {
+          if (!msg.model && currentModelName) msg.model = currentModelName;
+          if (!msg.reasoning && reasoningText) msg.reasoning = reasoningText;
+        }
+      }
+      session.messages = redact(resultMessages, secrets);
       run.status = controller.signal.aborted ? 'cancelled' : 'completed';
     } catch (error) {
       run.status = controller.signal.aborted ? 'cancelled' : 'failed';
@@ -316,7 +348,16 @@ export class Runtime {
     const session = this.session(run.sessionId);
     if (run.messageOffset !== undefined && session.messages.length > run.messageOffset) return;
     const text = partialText(this.events(run.id));
-    if (text) session.messages.push({ role: 'assistant', content: `[未完成的输出，工具操作不会自动重放]\n${text}` });
+    const reasoning = partialReasoning(this.events(run.id));
+    const model = session.config?.values?.model?.name;
+    if (text || reasoning) {
+      session.messages.push({
+        role: 'assistant',
+        content: text ? `[未完成的输出，工具操作不会自动重放]\n${text}` : '[任务已中断]',
+        ...(model ? { model } : {}),
+        ...(reasoning ? { reasoning } : {}),
+      } as any);
+    }
   }
 
   async close() {

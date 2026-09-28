@@ -3,6 +3,8 @@ export interface PromptContext {
     deferredToolSummary: string;
     sessionMessageCount: number;
     sessionId: string;
+    modelName?: string;
+    provider?: string;
 }
   
   type PipeFn = (ctx: PromptContext) => string | null;
@@ -64,7 +66,16 @@ export interface PromptContext {
     };
   }
   
-  export function sessionContext(): PipeFn {
+  export function modelIdentity(): PipeFn {
+  return (ctx) => {
+    if (!ctx.modelName) return null;
+    return `[模型身份与环境说明]
+当前底层为你提供算力与推理的模型是：${ctx.modelName}（Provider: ${ctx.provider || 'default'}）。
+当用户询问你是哪个模型、或者询问你的模型版本/底层模型时，请准确、如实告知用户当前运行的底层模型为 ${ctx.modelName}。`;
+  };
+}
+
+export function sessionContext(): PipeFn {
     return (ctx) => {
       if (ctx.sessionMessageCount === 0) return null;
       return `[会话信息] 当前会话 ${ctx.sessionId}，已有 ${ctx.sessionMessageCount} 条历史消息。`;

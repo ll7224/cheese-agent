@@ -106,6 +106,11 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
     const body = await context.req.json();
     return context.json(runtime.createSession(body.workspaceId, body.modelId), 201);
   });
+  app.post('/api/v1/sessions/:id/model', async context => {
+    const body = await context.req.json();
+    if (!body?.modelId || typeof body.modelId !== 'string') throw new RuntimeError('缺少有效的 modelId 参数');
+    return context.json(runtime.updateSessionModel(context.req.param('id'), body.modelId));
+  });
   app.get('/api/v1/sessions/:id', context => context.json({ ...runtime.session(context.req.param('id')), runs: runtime.state.runs.filter(run => run.sessionId === context.req.param('id')), events: runtime.state.events.filter(event => event.sessionId === context.req.param('id')) }));
   app.get('/api/v1/runs/:id/events', context => {
     const id = context.req.param('id');

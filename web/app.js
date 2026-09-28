@@ -205,15 +205,28 @@ function restoreDraft() { element('prompt').value = sessionStorage.getItem(draft
 element('prompt').addEventListener('input', () => sessionStorage.setItem(draftKey(), element('prompt').value));
 
 function navigate(id = '') {
+  sessionId = id;
+  if (!id) {
+    currentSession = undefined;
+    currentRun = undefined;
+  }
   if (location.hash.slice(1) === id) changeRoute();
   else location.hash = id;
 }
 
 function changeRoute() {
   sessionId = location.hash.slice(1);
-  currentSession = undefined; currentRun = undefined; messagesSignature = '';
+  if (!sessionId) {
+    currentSession = undefined;
+    currentRun = undefined;
+  }
+  messagesSignature = '';
   eventSource?.close(); eventSource = undefined; streamingRun = undefined; events.clear(); element('events').replaceChildren();
   element('error').hidden = true;
+  element('live-text').innerHTML = '';
+  if (element('live-reasoning')) element('live-reasoning').hidden = true;
+  if (element('live-reasoning-text')) element('live-reasoning-text').innerHTML = '';
+  if (element('live-tool-status')) element('live-tool-status').hidden = true;
   document.body.classList.toggle('workbench', !!sessionId);
   element('hero').hidden = !!sessionId;
   element('home-bottom').hidden = !!sessionId;
@@ -229,10 +242,10 @@ function updateModelCapsuleDisplay() {
   const modelNameEl = element('current-model-name');
   if (!modelNameEl) return;
   if (currentSession) {
-    const sessionModel = currentSession.config?.values.model;
-    const displayName = sessionModel?.name || 'Agent';
+    const sessionModel = currentSession.config?.values?.model;
+    const displayName = sessionModel?.name || activeModelName || 'Agent';
     modelNameEl.textContent = displayName;
-    element('model-label').title = `当前会话模型: ${displayName} (${sessionModel?.provider || 'default'})`;
+    element('model-label').title = `当前会话模型: ${displayName} (${sessionModel?.provider || 'default'}) · 点击切换`;
   } else {
     const activeConfig = modelsList.find(m => m.id === selectedModelId) || modelsList.find(m => m.isDefault) || modelsList[0];
     if (activeConfig) {
@@ -258,7 +271,14 @@ function renderControls() {
   element('directory-label').title = workspace?.path || '';
   updateModelCapsuleDisplay();
   element('run-status').textContent = currentRun ? labels[currentRun.status] || currentRun.status : '准备好开始了';
-  element('live').hidden = !busy || !element('live-text').textContent;
+
+  const liveBadge = element('live-model-badge');
+  if (liveBadge) {
+    const liveModelName = currentSession?.config?.values?.model?.name || activeModelName || '';
+    liveBadge.textContent = liveModelName;
+    liveBadge.hidden = !liveModelName;
+  }
+  element('live').hidden = !busy;
 }
 
 function messageText(message) {
@@ -269,21 +289,46 @@ function renderMessages(session) {
   const signature = JSON.stringify(session.messages);
   if (signature === messagesSignature) return;
   messagesSignature = signature;
-  element('messages').replaceChildren(...session.messages.filter(message => ['user', 'assistant'].includes(message.role) && messageText(message)).map(message => {
+  const sessionDefaultModel = session.config?.values?.model?.name || '';
+  element('messages').replaceChildren(...session.messages.filter(message => ['user', 'assistant'].includes(message.role) && (messageText(message) || message.reasoning)).map(message => {
     const article = node('article', `message ${message.role}`);
     const author = node('div', 'message-author');
     if (message.role === 'user') {
       author.textContent = 'YOU / 用户';
     } else {
-      author.append(node('span', 'assistant-avatar', '🧀'), document.createTextNode(' CHEESE'));
+      const modelTag = message.model || sessionDefaultModel;
+      author.append(
+        node('span', 'assistant-avatar', '🧀'),
+        document.createTextNode(' CHEESE')
+      );
+      if (modelTag) {
+        author.append(node('span', 'message-model-badge', modelTag));
+      }
     }
+    article.append(author);
+
+    // If assistant message has reasoning process, render collapsible block above answer
+    if (message.role === 'assistant' && message.reasoning) {
+      const reasoningBlock = node('details', 'reasoning-block');
+      const reasoningSummary = node('summary', 'reasoning-summary');
+      reasoningSummary.append(
+        node('span', 'reasoning-icon', '💭'),
+        node('span', 'reasoning-title', '深度推理过程'),
+        node('span', 'reasoning-arrow', '▾')
+      );
+      const reasoningContent = node('div', 'reasoning-content markdown-body');
+      reasoningContent.innerHTML = parseMarkdown(message.reasoning);
+      reasoningBlock.append(reasoningSummary, reasoningContent);
+      article.append(reasoningBlock);
+    }
+
     const content = node('div', `message-content ${message.role === 'assistant' ? 'markdown-body' : ''}`);
     if (message.role === 'assistant') {
       content.innerHTML = parseMarkdown(messageText(message));
     } else {
       content.textContent = messageText(message);
     }
-    article.append(author, content);
+    article.append(content);
     return article;
   }));
 }
@@ -315,9 +360,64 @@ function renderEvents() {
   const attempts = new Map();
   current.filter(event => !event.childRunId && ['text', 'retry'].includes(event.type)).forEach(event => attempts.set(event.step, Math.max(attempts.get(event.step) || 0, Number(event.attempt || 1) + (event.type === 'retry' ? 1 : 0))));
   const liveRaw = current.filter(event => !event.childRunId && event.type === 'text' && Number(event.attempt || 1) === attempts.get(event.step)).map(event => event.text).join('');
-  element('live-text').innerHTML = parseMarkdown(liveRaw);
 
-  const details = all.filter(event => event.type !== 'text');
+  // Live reasoning stream
+  const liveReasoningRaw = current.filter(event => !event.childRunId && event.type === 'reasoning').map(event => event.text).join('');
+  const liveReasoningEl = element('live-reasoning');
+  const liveReasoningTextEl = element('live-reasoning-text');
+  const liveStatusEl = element('live-status');
+  const liveToolStatusEl = element('live-tool-status');
+
+  // Find recent active tool event
+  const recentToolStart = [...current].reverse().find(e => e.type === 'tool-start');
+  const recentToolResult = [...current].reverse().find(e => ['tool-result', 'tool-error'].includes(e.type));
+  const isToolRunning = recentToolStart && (!recentToolResult || recentToolResult.sequence < recentToolStart.sequence);
+
+  if (liveToolStatusEl) {
+    if (isToolRunning) {
+      liveToolStatusEl.hidden = false;
+      liveToolStatusEl.replaceChildren(
+        node('span', 'tool-icon', toolIcon(recentToolStart.name)),
+        document.createTextNode(` 正在执行工具: ${recentToolStart.name} ${formatToolBrief(recentToolStart)}`)
+      );
+    } else {
+      liveToolStatusEl.hidden = true;
+    }
+  }
+
+  if (liveReasoningEl && liveReasoningTextEl) {
+    if (liveReasoningRaw) {
+      liveReasoningEl.hidden = false;
+      liveReasoningTextEl.innerHTML = parseMarkdown(liveReasoningRaw);
+      liveReasoningTextEl.scrollTop = liveReasoningTextEl.scrollHeight;
+    } else {
+      liveReasoningEl.hidden = true;
+    }
+  }
+
+  if (liveStatusEl) {
+    if (currentRun?.status === 'queued') {
+      liveStatusEl.textContent = '排队中…';
+    } else if (liveRaw) {
+      liveStatusEl.textContent = '正在生成回复…';
+    } else if (isToolRunning) {
+      liveStatusEl.textContent = `执行工具: ${recentToolStart.name}…`;
+    } else if (liveReasoningRaw) {
+      liveStatusEl.textContent = '深度思考推理中…';
+    } else {
+      liveStatusEl.textContent = '思考中，请稍候…';
+    }
+  }
+
+  if (!liveRaw && !liveReasoningRaw && !isToolRunning && active(currentRun?.status)) {
+    element('live-text').innerHTML = '<div class="live-thinking-placeholder"><span class="live-thinking-spinner">🧀</span><span>正在连接模型并进行推理思考，请稍候…</span></div>';
+  } else if (!liveRaw) {
+    element('live-text').innerHTML = '';
+  } else {
+    element('live-text').innerHTML = parseMarkdown(liveRaw);
+  }
+
+  const details = all.filter(event => event.type !== 'text' && event.type !== 'reasoning');
   for (const event of details) {
     if (element('events').querySelector(`[data-event="${event.id}"]`)) continue;
     const detail = node('details', 'tool-card event');
@@ -399,10 +499,25 @@ async function refresh() {
     element('breadcrumb').textContent = session ? session.title : '总览';
     if (session) {
       element('session-title').textContent = session.title;
-      element('session-meta').textContent = `${workspaces.find(workspace => workspace.id === workspaceId)?.path || ''} · ${session.config?.values.model.name || 'Agent'}`;
+      element('session-meta').textContent = `${workspaces.find(workspace => workspace.id === workspaceId)?.path || ''} · ${session.config?.values?.model?.name || 'Agent'}`;
       renderMessages(session);
       connectEvents(currentRun, session.events || []);
       if (currentRun?.error) report(new Error(currentRun.error));
+
+      const sessionModelName = session.config?.values?.model?.name;
+      if (sessionModelName) {
+        activeModelName = sessionModelName;
+        localStorage.setItem('cheese.activeModelName', activeModelName);
+        const matching = modelsList.find(m =>
+          (session.modelId && (m.id === session.modelId || session.modelId.startsWith(`${m.id}:`))) ||
+          m.name === sessionModelName ||
+          (Array.isArray(m.models) && m.models.includes(sessionModelName))
+        );
+        if (matching) {
+          selectedModelId = matching.id;
+          localStorage.setItem('cheese.selectedModel', selectedModelId);
+        }
+      }
     }
 
     // Fetch sessions for all expanded workspaces in parallel
@@ -653,32 +768,77 @@ document.addEventListener('keydown', event => {
 });
 if (matchMedia('(max-width:850px)').matches) setSidebar(false);
 matchMedia('(max-width:850px)').addEventListener('change', event => setSidebar(!event.matches));
-/* --- Theme Management (Impeccable Kinpaku Light & Instrument Dark) --- */
+/* --- Theme Management (Auto Time-based & Impeccable Kinpaku Light / Instrument Dark) --- */
 const themeToggle = element('theme-toggle');
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  localStorage.setItem('cheese.theme', theme);
-  if (themeToggle) {
-    const isDark = theme === 'dark';
-    const icon = themeToggle.querySelector('.theme-icon');
-    const text = themeToggle.querySelector('.theme-text');
-    if (icon) icon.textContent = isDark ? '🌙' : '☀️';
-    if (text) text.textContent = isDark ? '仪器暗色' : '和纸白';
-    themeToggle.setAttribute('aria-label', isDark ? '切换至和纸白主题' : '切换至仪器暗色主题');
-    themeToggle.setAttribute('title', isDark ? '切换至和纸白主题' : '切换至仪器暗色主题');
-  }
-  const metaTheme = document.querySelector('meta[name="theme-color"]');
-  if (metaTheme) metaTheme.content = theme === 'dark' ? '#141518' : '#f8f8fa';
+
+function getTimeBasedTheme() {
+  const hour = new Date().getHours();
+  // 白天 (06:00 - 18:00) 对应和纸白 (light)；夜间 (18:00 - 06:00) 对应仪器暗色 (dark)
+  return (hour >= 6 && hour < 18) ? 'light' : 'dark';
 }
 
-const savedTheme = localStorage.getItem('cheese.theme') || 'light';
-applyTheme(savedTheme);
+let themeMode = localStorage.getItem('cheese.theme.mode') || 'auto';
+
+function applyTheme(mode) {
+  themeMode = mode;
+  localStorage.setItem('cheese.theme.mode', themeMode);
+
+  const effectiveTheme = themeMode === 'auto' ? getTimeBasedTheme() : themeMode;
+  document.documentElement.dataset.theme = effectiveTheme;
+  localStorage.setItem('cheese.theme', effectiveTheme);
+
+  if (themeToggle) {
+    const icon = themeToggle.querySelector('.theme-icon');
+    const text = themeToggle.querySelector('.theme-text');
+    if (themeMode === 'auto') {
+      const isDay = effectiveTheme === 'light';
+      if (icon) icon.textContent = isDay ? '🌤️' : '🌙';
+      if (text) text.textContent = isDay ? '自动·和纸白' : '自动·仪器暗色';
+      themeToggle.setAttribute('aria-label', `当前为时间自动主题 (${isDay ? '白天: 和纸白' : '夜间: 仪器暗色'})，点击切换`);
+      themeToggle.setAttribute('title', `时间自动模式 (06:00-18:00 和纸白，18:00-06:00 仪器暗色) · 点击切换模式`);
+    } else if (themeMode === 'light') {
+      if (icon) icon.textContent = '☀️';
+      if (text) text.textContent = '和纸白 (固定)';
+      themeToggle.setAttribute('aria-label', '当前固定为和纸白主题，点击切换为仪器暗色');
+      themeToggle.setAttribute('title', '当前固定为和纸白主题 · 点击切换');
+    } else {
+      if (icon) icon.textContent = '🌙';
+      if (text) text.textContent = '仪器暗色 (固定)';
+      themeToggle.setAttribute('aria-label', '当前固定为仪器暗色主题，点击恢复时间自动模式');
+      themeToggle.setAttribute('title', '当前固定为仪器暗色主题 · 点击切换');
+    }
+  }
+
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) metaTheme.content = effectiveTheme === 'dark' ? '#141518' : '#f8f8fa';
+
+  if (typeof startOrb === 'function') startOrb();
+}
+
+// 初始化主题 (默认优先按照时间自动切换)
+applyTheme(themeMode);
+
+// 定时监听时间跨度（如跨越 06:00 或 18:00 时自动平滑切换）
+setInterval(() => {
+  if (themeMode === 'auto') {
+    const expectedTheme = getTimeBasedTheme();
+    if (document.documentElement.dataset.theme !== expectedTheme) {
+      applyTheme('auto');
+    }
+  }
+}, 30000);
 
 if (themeToggle) {
   themeToggle.onclick = () => {
-    const current = document.documentElement.dataset.theme;
-    applyTheme(current === 'dark' ? 'light' : 'dark');
-    if (typeof startOrb === 'function') startOrb();
+    // 循环切换模式：auto (自动跟随时间) -> 手动反转 -> 手动对应主题 -> auto (自动跟随时间)
+    if (themeMode === 'auto') {
+      const current = document.documentElement.dataset.theme;
+      applyTheme(current === 'dark' ? 'light' : 'dark');
+    } else if (themeMode === 'light') {
+      applyTheme('dark');
+    } else {
+      applyTheme('auto');
+    }
   };
 }
 
@@ -733,8 +893,25 @@ function renderModelPicker() {
     return;
   }
 
+  // Check if current session has a specific model configured
+  const sessionModelName = currentSession?.config?.values?.model?.name;
+
   // Find active API configuration
   let activeConfig = modelsList.find(m => m.id === selectedModelId);
+  // If in a session and we have sessionModelName, prefer the config that contains this model
+  if (sessionModelName) {
+    const matchingConfig = modelsList.find(m =>
+      (currentSession.modelId && (m.id === currentSession.modelId || currentSession.modelId.startsWith(`${m.id}:`))) ||
+      m.name === sessionModelName ||
+      (Array.isArray(m.models) && m.models.includes(sessionModelName))
+    );
+    if (matchingConfig) {
+      activeConfig = matchingConfig;
+      selectedModelId = activeConfig.id;
+      localStorage.setItem('cheese.selectedModel', selectedModelId);
+    }
+  }
+
   if (!activeConfig) {
     activeConfig = modelsList.find(m => m.isDefault) || modelsList[0];
     selectedModelId = activeConfig.id;
@@ -785,14 +962,14 @@ function renderModelPicker() {
     return;
   }
 
-  if (!activeModelName || !enabledModels.includes(activeModelName)) {
-    activeModelName = enabledModels.includes(activeConfig.name) ? activeConfig.name : enabledModels[0];
-    localStorage.setItem('cheese.activeModelName', activeModelName);
-  }
+  const targetActive = sessionModelName || activeModelName;
+  const currentActiveName = (targetActive && enabledModels.includes(targetActive))
+    ? targetActive
+    : (enabledModels.includes(activeModelName) ? activeModelName : (enabledModels.includes(activeConfig.name) ? activeConfig.name : enabledModels[0]));
 
   // Render each enabled model under the active API configuration
   for (const modelName of enabledModels) {
-    const isCurrentActive = modelName === activeModelName;
+    const isCurrentActive = modelName === currentActiveName;
     const isPrimary = modelName === activeConfig.name;
 
     const item = node('button', `popover-item ${isCurrentActive ? 'active' : ''}`);
@@ -807,9 +984,25 @@ function renderModelPicker() {
       item.append(node('span', 'popover-item-tag', '主'));
     }
 
-    item.onclick = () => {
+    item.onclick = async () => {
       activeModelName = modelName;
       localStorage.setItem('cheese.activeModelName', activeModelName);
+      const compositeId = `${activeConfig.id}:${modelName}`;
+
+      if (currentSession) {
+        try {
+          const updated = await api(`/sessions/${currentSession.id}/model`, { modelId: compositeId });
+          currentSession = updated;
+          if (currentSession.config?.values?.model) {
+            currentSession.config.values.model.name = modelName;
+          }
+          const ws = workspaceList.find(w => w.id === workspaceId);
+          element('session-meta').textContent = `${ws?.path || ''} · ${modelName}`;
+        } catch (err) {
+          console.warn('Failed to update session model:', err);
+        }
+      }
+
       closeModelPopover();
       renderControls();
     };
