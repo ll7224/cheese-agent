@@ -9,10 +9,11 @@ import { redact, redactStream, collectSecrets, partialText, type AgentEvent, typ
 import { Pool } from './pool.js';
 import { CronService } from '../cron/service.js';
 import { createCronTool } from '../tools/cron-tools.js';
+import { ModelStore, type StoredModel, type MaskedModel, testConnection, fetchRemoteModels } from './model-store.js';
 import type { CheeseAgentConfig } from '../config/schema.js';
 
 export interface Workspace { id: string; path: string; name: string }
-export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot; source?: string }
+export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot; source?: string; modelId?: string }
 export interface Run { id: string; sessionId: string; key: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'stopping' | 'cancelled' | 'interrupted'; error?: string; messageOffset?: number; input?: string }
 interface State { workspaces: Workspace[]; sessions: Session[]; runs: Run[]; events: ExecutionEvent[] }
 function readState(file: string): State {
@@ -40,8 +41,12 @@ export class Runtime {
   private cronDirectories = new Map<string, string>();
   private schedulesEnabled = false;
   private recoveredBackup = false;
+  modelStore: ModelStore;
 
-  constructor(dataDir: string, private executor: Executor = executeWorker, private options: { configDir?: string; maxConcurrent?: number; maxChildren?: number } = {}) {
+  constructor(dataDir: string, private executor: Executor = executeWorker, private options: { configDir?: string; modelDir?: string; maxConcurrent?: number; maxChildren?: number } = {}) {
+    const isCustomDataDir = dataDir.includes('cheese-') || dataDir.includes('/tmp') || dataDir.includes('/var/folders');
+    const defaultModelDir = isCustomDataDir ? join(dataDir, 'models') : join(homedir(), '.cheese');
+    this.modelStore = new ModelStore(options.modelDir || defaultModelDir);
     this.children = new Pool(options.maxChildren ?? 3);
     if (!Number.isInteger(options.maxConcurrent ?? 3) || (options.maxConcurrent ?? 3) < 1) throw new RuntimeError('并发额度必须为正整数');
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -123,7 +128,11 @@ export class Runtime {
   }
 
   listWorkspaces() {
-    return this.state.workspaces.map(workspace => ({ ...workspace, available: this.available(workspace) }));
+    return this.state.workspaces.map(workspace => ({
+      ...workspace,
+      available: this.available(workspace),
+      sessionCount: this.state.sessions.filter(item => item.workspaceId === workspace.id).length
+    }));
   }
 
   private available(workspace: Workspace) {
@@ -131,14 +140,29 @@ export class Runtime {
     catch { return false; }
   }
 
-  createSession(workspaceId: string) {
+  createSession(workspaceId: string, modelId?: string) {
     if (!this.available(this.workspace(workspaceId))) throw new RuntimeError('工作目录已不可用');
-    const config = captureConfig(this.options.configDir || this.workspace(workspaceId).path, this.workspace(workspaceId).path);
+    const defaultModel = this.modelStore.getDefault();
+    const isModelUsable = (m?: StoredModel) => Boolean(m && (m.apiKey || m.provider === 'ollama' || m.provider === 'mock'));
+    const selectedModel = modelId ? this.modelStore.resolveModel(modelId) : (isModelUsable(defaultModel) ? defaultModel : undefined);
+    const config = captureConfig(
+      this.options.configDir || this.workspace(workspaceId).path,
+      this.workspace(workspaceId).path,
+      selectedModel
+    );
     if (this.schedulesEnabled) {
       try { this.cron(workspaceId, config.values); }
       catch { console.warn(`目录 ${this.workspace(workspaceId).path} 的定时任务未启动，请检查目录配置；普通会话不受影响`); }
     }
-    const session: Session = { id: randomUUID(), workspaceId, title: '新会话', updatedAt: new Date().toISOString(), messages: [], config };
+    const session: Session = {
+      id: randomUUID(),
+      workspaceId,
+      title: '新会话',
+      updatedAt: new Date().toISOString(),
+      messages: [],
+      config,
+      modelId: modelId || selectedModel?.id
+    };
     this.state.sessions.push(session);
     this.save();
     return session;

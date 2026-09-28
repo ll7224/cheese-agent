@@ -6,6 +6,7 @@ let workspaceId = localStorage.getItem('cheese.workspace') || '';
 let currentSession;
 let currentRun;
 let workspaceList = [];
+let expandedWorkspaces = new Set();
 let eventSource;
 let streamingRun;
 let events = new Map();
@@ -15,6 +16,13 @@ let pendingRefresh = false;
 let sessionLimit = 50;
 let messagesSignature = '';
 let detailsFocus;
+let modelsList = [];
+let presetsList = {};
+let selectedModelId = localStorage.getItem('cheese.selectedModel') || '';
+let activeModelName = localStorage.getItem('cheese.activeModelName') || '';
+let editingModelId = null;
+let availableModelsForForm = [];
+let enabledModelsForForm = new Set();
 
 const node = (tag, className, text) => {
   const result = document.createElement(tag);
@@ -217,6 +225,27 @@ function changeRoute() {
 }
 window.addEventListener('hashchange', changeRoute);
 
+function updateModelCapsuleDisplay() {
+  const modelNameEl = element('current-model-name');
+  if (!modelNameEl) return;
+  if (currentSession) {
+    const sessionModel = currentSession.config?.values.model;
+    const displayName = sessionModel?.name || 'Agent';
+    modelNameEl.textContent = displayName;
+    element('model-label').title = `当前会话模型: ${displayName} (${sessionModel?.provider || 'default'})`;
+  } else {
+    const activeConfig = modelsList.find(m => m.id === selectedModelId) || modelsList.find(m => m.isDefault) || modelsList[0];
+    if (activeConfig) {
+      const displayName = activeModelName || activeConfig.name || activeConfig.label;
+      modelNameEl.textContent = displayName;
+      element('model-label').title = `新建任务模型: ${displayName} (${activeConfig.label || activeConfig.provider}) · 点击切换`;
+    } else {
+      modelNameEl.textContent = '系统默认';
+      element('model-label').title = '使用系统默认或项目配置文件中的模型';
+    }
+  }
+}
+
 function renderControls() {
   const busy = active(currentRun?.status);
   const workspace = workspaceList.find(item => item.id === workspaceId);
@@ -227,8 +256,7 @@ function renderControls() {
   element('stop').textContent = currentRun?.status === 'stopping' ? '正在停止…' : currentRun?.status === 'queued' ? '取消排队' : '停止任务';
   element('directory-label').textContent = workspace?.name || '请接入目录';
   element('directory-label').title = workspace?.path || '';
-  const model = currentSession?.config?.values.model;
-  element('model-label').replaceChildren(node('span', 'mini-core'), document.createTextNode(model ? (model.provider === 'mock' ? '离线模拟模型' : model.name) : '目录配置 · 新会话'));
+  updateModelCapsuleDisplay();
   element('run-status').textContent = currentRun ? labels[currentRun.status] || currentRun.status : '准备好开始了';
   element('live').hidden = !busy || !element('live-text').textContent;
 }
@@ -354,34 +382,130 @@ async function refresh() {
   const requestedSession = sessionId;
   const requestedWorkspace = workspaceId;
   try {
-    const [workspaces, status, session] = await Promise.all([api('/workspaces'), api('/status'), requestedSession ? api(`/sessions/${requestedSession}`) : undefined]);
+    const [workspaces, status, session] = await Promise.all([
+      api('/workspaces'),
+      api('/status'),
+      requestedSession ? api(`/sessions/${requestedSession}`) : undefined
+    ]);
     if (sessionId !== requestedSession || workspaceId !== requestedWorkspace) return;
     workspaceList = workspaces;
     if (session) workspaceId = session.workspaceId;
     if (!workspaces.some(workspace => workspace.id === workspaceId)) workspaceId = workspaces[0]?.id || '';
+    if (workspaceId) expandedWorkspaces.add(workspaceId);
     localStorage.setItem('cheese.workspace', workspaceId);
-    element('workspaces').replaceChildren(...workspaces.map(workspace => new Option(`${workspace.name}${workspace.available ? '' : ' · 不可用'}`, workspace.id, false, workspace.id === workspaceId)));
-    element('workspaces').title = workspaces.find(workspace => workspace.id === workspaceId)?.path || '';
-    currentSession = session; currentRun = session?.runs.at(-1);
+
+    currentSession = session;
+    currentRun = session?.runs.at(-1);
     element('breadcrumb').textContent = session ? session.title : '总览';
     if (session) {
       element('session-title').textContent = session.title;
       element('session-meta').textContent = `${workspaces.find(workspace => workspace.id === workspaceId)?.path || ''} · ${session.config?.values.model.name || 'Agent'}`;
-      renderMessages(session); connectEvents(currentRun, session.events || []);
+      renderMessages(session);
+      connectEvents(currentRun, session.events || []);
       if (currentRun?.error) report(new Error(currentRun.error));
     }
-    const sessions = workspaceId ? (await Promise.all(Array.from({ length: Math.ceil(sessionLimit / 50) }, (_, page) => api(`/sessions?workspaceId=${workspaceId}&limit=50&offset=${page * 50}`)))).flat() : [];
-    if (sessionId !== requestedSession) return;
-    element('sessions').replaceChildren(...sessions.map(item => {
-      const button = node('button', item.id === sessionId ? 'selected' : '');
-      button.append(node('span', 'session-symbol', '●'), node('span', 'session-name', item.title));
-      if (active(item.run?.status)) button.append(node('span', 'session-state', labels[item.run.status]));
-      button.title = item.title; button.onclick = () => navigate(item.id);
-      return button;
+
+    // Fetch sessions for all expanded workspaces in parallel
+    const expandedList = workspaces.filter(w => expandedWorkspaces.has(w.id));
+    const sessionsMap = new Map();
+    await Promise.all(expandedList.map(async w => {
+      try {
+        const list = await api(`/sessions?workspaceId=${w.id}&limit=50&offset=0`);
+        sessionsMap.set(w.id, list);
+      } catch {
+        sessionsMap.set(w.id, []);
+      }
     }));
-    if (!sessions.length) element('sessions').append(node('p', 'empty-history', '还没有会话。\n从一个任务开始吧。'));
-    element('load-more').hidden = sessions.length < sessionLimit;
-    const others = sessions.filter(item => item.id !== sessionId && active(item.run?.status));
+
+    if (sessionId !== requestedSession) return;
+
+    const shortenPath = p => (p ? p.replace(/^\/Users\/[^\/]+/, '~') : '');
+
+    element('workspaces').replaceChildren(...workspaces.map(workspace => {
+      const isSelected = workspace.id === workspaceId;
+      const isExpanded = expandedWorkspaces.has(workspace.id);
+      const group = node('div', `workspace-group ${isSelected ? 'active' : ''} ${isExpanded ? 'expanded' : ''}`);
+
+      const header = node('button', 'workspace-header');
+      header.type = 'button';
+      header.title = workspace.available
+        ? `${workspace.name} · 点击在此项目发起新任务`
+        : `${workspace.name} (${workspace.path}) · 目录不可用`;
+
+      const chevron = node('span', 'ws-chevron', '›');
+      chevron.title = isExpanded ? '收起会话' : '展开会话';
+      chevron.onclick = (e) => {
+        e.stopPropagation();
+        if (expandedWorkspaces.has(workspace.id)) {
+          expandedWorkspaces.delete(workspace.id);
+        } else {
+          expandedWorkspaces.add(workspace.id);
+        }
+        refresh();
+      };
+
+      const meta = node('div', 'ws-meta');
+      meta.append(
+        node('span', 'ws-name', workspace.name),
+        node('span', 'ws-path', shortenPath(workspace.path))
+      );
+
+      const count = workspace.sessionCount !== undefined ? workspace.sessionCount : (sessionsMap.get(workspace.id)?.length || 0);
+      const badge = node('span', 'ws-badge', workspace.available ? `${count}` : '不可用');
+      badge.title = `${count} 个会话`;
+
+      header.append(chevron, meta, badge);
+
+      header.onclick = () => {
+        workspaceId = workspace.id;
+        expandedWorkspaces.add(workspace.id);
+        localStorage.setItem('cheese.workspace', workspaceId);
+        navigate();
+        element('prompt').focus();
+      };
+
+      group.append(header);
+
+      if (isExpanded) {
+        const sessionsContainer = node('div', 'workspace-sessions');
+        const wsSessions = sessionsMap.get(workspace.id) || [];
+        if (wsSessions.length) {
+          for (const item of wsSessions) {
+            const isCurrent = item.id === sessionId;
+            const isRunning = active(item.run?.status);
+            const sessionBtn = node('button', `session-item ${isCurrent ? 'selected' : ''} ${isRunning ? 'active-run' : ''}`);
+            sessionBtn.type = 'button';
+            sessionBtn.title = item.title;
+
+            const dot = node('span', 'session-dot');
+            const title = node('span', 'session-title', item.title);
+            sessionBtn.append(dot, title);
+
+            if (isRunning) {
+              sessionBtn.append(node('span', 'session-state', labels[item.run.status]));
+            }
+
+            sessionBtn.onclick = (e) => {
+              e.stopPropagation();
+              workspaceId = workspace.id;
+              localStorage.setItem('cheese.workspace', workspaceId);
+              navigate(item.id);
+            };
+
+            sessionsContainer.append(sessionBtn);
+          }
+        } else {
+          sessionsContainer.append(node('div', 'empty-ws-sessions', '暂无历史会话'));
+        }
+
+        group.append(sessionsContainer);
+      }
+
+      return group;
+    }));
+
+    const currentWsSessions = sessionsMap.get(workspaceId) || [];
+    const others = currentWsSessions.filter(item => item.id !== sessionId && active(item.run?.status));
     const unavailable = !workspaces.find(workspace => workspace.id === workspaceId)?.available;
     element('notice').hidden = !others.length && !unavailable && !['interrupted', 'cancelled'].includes(currentRun?.status);
     element('notice').textContent = unavailable ? '目录不可用。你仍可查看历史；恢复目录或选择其他目录后再开始任务。' : others.length ? `此目录另有 ${others.length} 个待完成任务。会话共享实际文件，修改可能互相覆盖。` : '上次执行已停止或中断，已完成修改会保留。输入补充要求即可继续，不会自动重放旧工具操作。';
@@ -403,7 +527,11 @@ element('composer').addEventListener('submit', async event => {
   const previousDraft = draftKey();
   try {
     if (!sessionId) {
-      const session = await api('/sessions', { workspaceId });
+      const sessionPayload = { workspaceId };
+      if (selectedModelId) {
+        sessionPayload.modelId = activeModelName ? `${selectedModelId}:${activeModelName}` : selectedModelId;
+      }
+      const session = await api('/sessions', sessionPayload);
       sessionId = session.id;
       history.replaceState(null, '', `#${sessionId}`);
       sessionStorage.setItem(draftKey(), text);
@@ -433,8 +561,6 @@ element('stop').onclick = async () => {
 };
 
 element('new-task').onclick = () => { navigate(); element('prompt').focus(); };
-element('workspaces').onchange = event => { workspaceId = event.target.value; sessionLimit = 50; navigate(); };
-element('load-more').onclick = () => { sessionLimit += 50; refresh(); };
 
 document.querySelectorAll('[data-prompt]').forEach(button => {
   button.onclick = () => {
@@ -445,44 +571,52 @@ document.querySelectorAll('[data-prompt]').forEach(button => {
 });
 
 let choosingDirectory = false;
-element('add-workspace').onclick = () => {
-  element('directory-error').textContent = '';
-  element('directory-status').textContent = '';
-  element('directory-manual').open = false;
-  element('directory-dialog').showModal();
-  element('pick-directory').focus();
-};
-element('close-directory').onclick = () => element('directory-dialog').close();
-element('directory-dialog').addEventListener('close', () => element('add-workspace').focus());
-element('directory-dialog').addEventListener('cancel', event => { if (choosingDirectory) event.preventDefault(); });
-
 async function connectDirectory(path) {
   const workspace = await api('/workspaces', { path });
   workspaceId = workspace.id; sessionLimit = 50;
-  element('directory-dialog').close(); navigate();
+  if (element('directory-dialog').open) element('directory-dialog').close();
+  navigate();
 }
 
-element('pick-directory').onclick = async () => {
+async function pickFolderDirectly() {
   if (choosingDirectory) return;
   choosingDirectory = true;
-  for (const id of ['pick-directory', 'connect-directory', 'close-directory']) element(id).disabled = true;
+  const addBtn = element('add-workspace');
+  const prevText = addBtn ? addBtn.textContent : '';
+  if (addBtn) { addBtn.disabled = true; addBtn.textContent = '选择中…'; }
+  for (const id of ['pick-directory', 'connect-directory', 'close-directory']) {
+    const el = element(id); if (el) el.disabled = true;
+  }
   element('directory-error').textContent = '';
   element('directory-status').textContent = '请在系统窗口中选择文件夹…';
+
   try {
     const { path } = await api('/workspaces/pick-directory', {});
-    if (path) await connectDirectory(path);
-    else element('directory-status').textContent = '已取消选择，可以重新选择文件夹。';
+    if (path) {
+      await connectDirectory(path);
+    } else {
+      element('directory-status').textContent = '已取消选择文件夹。';
+    }
   } catch (error) {
     element('directory-status').textContent = '';
     element('directory-error').textContent = error.message;
     element('directory-manual').open = true;
+    element('directory-dialog').showModal();
     element('directory-path').focus();
   } finally {
     choosingDirectory = false;
-    for (const id of ['pick-directory', 'connect-directory', 'close-directory']) element(id).disabled = false;
-    if (element('directory-dialog').open && !element('directory-manual').open) element('pick-directory').focus();
+    if (addBtn) { addBtn.disabled = false; addBtn.textContent = prevText; }
+    for (const id of ['pick-directory', 'connect-directory', 'close-directory']) {
+      const el = element(id); if (el) el.disabled = false;
+    }
   }
-};
+}
+
+element('add-workspace').onclick = pickFolderDirectly;
+element('pick-directory').onclick = pickFolderDirectly;
+element('close-directory').onclick = () => element('directory-dialog').close();
+element('directory-dialog').addEventListener('close', () => element('add-workspace').focus());
+element('directory-dialog').addEventListener('cancel', event => { if (choosingDirectory) event.preventDefault(); });
 
 element('directory-form').onsubmit = async event => {
   event.preventDefault();
@@ -548,6 +682,621 @@ if (themeToggle) {
   };
 }
 
+/* --- LLM & API Key Configuration Management --- */
+
+async function loadModels() {
+  try {
+    const [models, presets] = await Promise.all([
+      api('/models'),
+      api('/models/presets')
+    ]);
+    modelsList = Array.isArray(models) ? models : [];
+    presetsList = presets || {};
+
+    const def = modelsList.find(m => m.isDefault);
+    if (!modelsList.some(m => m.id === selectedModelId)) {
+      selectedModelId = def ? def.id : (modelsList[0]?.id || '');
+      if (selectedModelId) localStorage.setItem('cheese.selectedModel', selectedModelId);
+    }
+
+    const activeConfig = modelsList.find(m => m.id === selectedModelId);
+    if (activeConfig) {
+      const enabled = (activeConfig.models && activeConfig.models.length > 0)
+        ? activeConfig.models
+        : (activeConfig.name ? [activeConfig.name] : []);
+      if (!activeModelName || !enabled.includes(activeModelName)) {
+        activeModelName = enabled.includes(activeConfig.name) ? activeConfig.name : (enabled[0] || '');
+        if (activeModelName) localStorage.setItem('cheese.activeModelName', activeModelName);
+      }
+    }
+
+    renderModelPicker();
+    renderModelDialogList();
+    renderControls();
+  } catch (err) {
+    console.warn('Failed to load models:', err);
+  }
+}
+
+function renderModelPicker() {
+  const listEl = element('model-popover-list');
+  const badgeEl = element('popover-config-badge');
+  const configRowEl = element('popover-config-row');
+  const configSelectEl = element('popover-config-select');
+  if (!listEl) return;
+  listEl.replaceChildren();
+
+  if (modelsList.length === 0) {
+    if (badgeEl) badgeEl.textContent = '未配置';
+    if (configRowEl) configRowEl.hidden = true;
+    listEl.append(node('div', 'empty-ws-sessions', '尚未配置模型，请点击下方管理模型配置。'));
+    return;
+  }
+
+  // Find active API configuration
+  let activeConfig = modelsList.find(m => m.id === selectedModelId);
+  if (!activeConfig) {
+    activeConfig = modelsList.find(m => m.isDefault) || modelsList[0];
+    selectedModelId = activeConfig.id;
+    localStorage.setItem('cheese.selectedModel', selectedModelId);
+  }
+
+  if (badgeEl) {
+    badgeEl.textContent = activeConfig.label || activeConfig.name;
+    badgeEl.title = `供应商: ${activeConfig.provider} · BaseURL: ${activeConfig.baseURL}`;
+  }
+
+  // Render API config switcher if there is more than 1 config
+  if (configRowEl && configSelectEl) {
+    if (modelsList.length > 1) {
+      configRowEl.hidden = false;
+      configSelectEl.replaceChildren();
+      for (const m of modelsList) {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = `${m.label || m.name} (${m.provider})`;
+        if (m.id === activeConfig.id) opt.selected = true;
+        configSelectEl.append(opt);
+      }
+      configSelectEl.onchange = () => {
+        selectedModelId = configSelectEl.value;
+        localStorage.setItem('cheese.selectedModel', selectedModelId);
+        const newConfig = modelsList.find(m => m.id === selectedModelId);
+        if (newConfig) {
+          const newModels = (newConfig.models && newConfig.models.length > 0) ? newConfig.models : [newConfig.name];
+          activeModelName = newModels[0] || newConfig.name;
+          localStorage.setItem('cheese.activeModelName', activeModelName);
+        }
+        renderModelPicker();
+        renderControls();
+      };
+    } else {
+      configRowEl.hidden = true;
+    }
+  }
+
+  // Get enabled models for the active configuration
+  const enabledModels = (activeConfig.models && activeConfig.models.length > 0)
+    ? activeConfig.models
+    : (activeConfig.name ? [activeConfig.name] : []);
+
+  if (enabledModels.length === 0) {
+    listEl.append(node('div', 'empty-ws-sessions', '此配置未勾选启用任何模型，请在配置页面勾选。'));
+    return;
+  }
+
+  if (!activeModelName || !enabledModels.includes(activeModelName)) {
+    activeModelName = enabledModels.includes(activeConfig.name) ? activeConfig.name : enabledModels[0];
+    localStorage.setItem('cheese.activeModelName', activeModelName);
+  }
+
+  // Render each enabled model under the active API configuration
+  for (const modelName of enabledModels) {
+    const isCurrentActive = modelName === activeModelName;
+    const isPrimary = modelName === activeConfig.name;
+
+    const item = node('button', `popover-item ${isCurrentActive ? 'active' : ''}`);
+    item.type = 'button';
+
+    const labelSpan = node('span', 'popover-item-label', modelName);
+    item.append(labelSpan);
+
+    if (isCurrentActive) {
+      item.append(node('span', 'popover-item-tag', '✓ 当前'));
+    } else if (isPrimary) {
+      item.append(node('span', 'popover-item-tag', '主'));
+    }
+
+    item.onclick = () => {
+      activeModelName = modelName;
+      localStorage.setItem('cheese.activeModelName', activeModelName);
+      closeModelPopover();
+      renderControls();
+    };
+
+    listEl.append(item);
+  }
+}
+
+function toggleModelPopover() {
+  const popover = element('model-popover');
+  const btn = element('model-label');
+  if (!popover || !btn) return;
+  const willOpen = popover.hidden;
+  popover.hidden = !willOpen;
+  btn.setAttribute('aria-expanded', String(willOpen));
+  if (willOpen) renderModelPicker();
+}
+
+function closeModelPopover() {
+  const popover = element('model-popover');
+  const btn = element('model-label');
+  if (popover) popover.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+document.addEventListener('click', event => {
+  const wrapper = event.target.closest('.model-picker-wrapper');
+  if (!wrapper) closeModelPopover();
+});
+
+function openModelDialog(modelToEditId) {
+  closeModelPopover();
+  const dialog = element('model-dialog');
+  if (!dialog) return;
+  dialog.showModal();
+  renderModelDialogList();
+  if (modelToEditId) {
+    selectModelForEditing(modelToEditId);
+  } else {
+    resetModelForm(element('model-provider-select')?.value || 'deepseek');
+  }
+}
+
+function closeModelDialog() {
+  const dialog = element('model-dialog');
+  if (dialog && dialog.open) dialog.close();
+}
+
+function renderModelDialogList() {
+  const listEl = element('configured-models-list');
+  if (!listEl) return;
+  listEl.replaceChildren();
+
+  if (modelsList.length === 0) {
+    listEl.append(node('div', 'empty-ws-sessions', '暂无已配置模型，请在右侧表单添加。'));
+    return;
+  }
+
+  for (const m of modelsList) {
+    const card = node('button', `model-card-item ${editingModelId === m.id ? 'selected' : ''}`);
+    card.type = 'button';
+
+    const topRow = node('div', 'model-card-top');
+    topRow.append(node('span', 'model-card-label', m.label || m.name));
+    if (m.isDefault) {
+      topRow.append(node('span', 'default-pill', '默认'));
+    }
+
+    const count = Array.isArray(m.models) && m.models.length > 0 ? m.models.length : 1;
+    const sub = node('div', 'model-card-sub', `${m.provider} · ${count} 个可用模型`);
+    const keyInfo = node('div', 'model-card-key', m.maskedKey ? `密钥: ${m.maskedKey}` : (m.hasKey ? '已配置密钥' : '未提供密钥'));
+
+    card.append(topRow, sub, keyInfo);
+    card.onclick = () => selectModelForEditing(m.id);
+    listEl.append(card);
+  }
+}
+
+function selectModelForEditing(id) {
+  const m = modelsList.find(item => item.id === id);
+  if (!m) return;
+  editingModelId = id;
+  element('edit-model-id').value = m.id;
+  element('model-provider-select').value = m.provider || 'custom';
+  element('model-label-input').value = m.label || '';
+  element('model-baseurl-input').value = m.baseURL || '';
+  element('model-apikey-input').value = '';
+  element('key-hint').textContent = m.maskedKey ? `当前已保存密钥: ${m.maskedKey}（留空表示不修改）` : '修改时若不修改密钥请留空';
+  element('model-default-checkbox').checked = !!m.isDefault;
+  element('delete-model-btn').hidden = false;
+  element('save-model-btn').textContent = '更新配置';
+  clearTestStatus();
+
+  const preset = presetsList[m.provider];
+  const recs = preset?.recommendedModels || [];
+  const savedModels = Array.isArray(m.models) && m.models.length > 0 ? m.models : (m.name ? [m.name] : []);
+
+  availableModelsForForm = Array.from(new Set([...savedModels, ...recs]));
+  enabledModelsForForm = new Set(savedModels);
+  if (m.name) enabledModelsForForm.add(m.name);
+
+  populateModelSelect(availableModelsForForm, m.name, '-- 点击右侧「拉取模型」或手动输入 --');
+  renderModelsChecklist();
+  renderModelDialogList();
+}
+
+function resetModelForm(provider = 'deepseek') {
+  editingModelId = null;
+  element('edit-model-id').value = '';
+  element('model-provider-select').value = provider;
+  element('model-apikey-input').value = '';
+  element('key-hint').textContent = '输入供应商 API Key，安全保存在本机';
+  element('model-default-checkbox').checked = modelsList.length === 0;
+  element('delete-model-btn').hidden = true;
+  element('save-model-btn').textContent = '保存配置';
+  clearTestStatus();
+  applyPresetToForm(provider);
+  renderModelDialogList();
+}
+
+function applyPresetToForm(provider) {
+  const preset = presetsList[provider];
+  if (preset) {
+    element('model-label-input').value = preset.label || '';
+    element('model-baseurl-input').value = preset.defaultBaseURL || preset.baseURL || '';
+    const recs = preset.recommendedModels || [];
+    availableModelsForForm = [...recs];
+    enabledModelsForForm = new Set(recs);
+    const defModel = preset.defaultModel || (recs[0] || '');
+    if (defModel) enabledModelsForForm.add(defModel);
+    populateModelSelect(recs, defModel, '-- 点击右侧「拉取模型」或手动输入 --');
+  } else {
+    element('model-label-input').value = '';
+    element('model-baseurl-input').value = '';
+    availableModelsForForm = [];
+    enabledModelsForForm = new Set();
+    populateModelSelect([], '', '-- 点击右侧「拉取模型」或手动输入 --');
+  }
+  renderModelsChecklist();
+}
+
+function populateModelSelect(models = [], selectedValue = '', defaultPlaceholder = '-- 请选择模型 --') {
+  const select = element('model-name-select');
+  if (!select) return;
+  select.replaceChildren();
+
+  if (models.length === 0) {
+    const emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.textContent = defaultPlaceholder;
+    select.append(emptyOpt);
+  } else {
+    for (const m of models) {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      select.append(opt);
+    }
+  }
+
+  // Always append custom option at bottom
+  const customOpt = document.createElement('option');
+  customOpt.value = '__custom__';
+  customOpt.textContent = '➕ 手动输入其它模型 ID...';
+  select.append(customOpt);
+
+  if (selectedValue) {
+    if (models.includes(selectedValue)) {
+      select.value = selectedValue;
+    } else {
+      const existingOpt = document.createElement('option');
+      existingOpt.value = selectedValue;
+      existingOpt.textContent = selectedValue;
+      select.insertBefore(existingOpt, customOpt);
+      select.value = selectedValue;
+    }
+  } else if (models.length > 0) {
+    select.value = models[0];
+  } else {
+    select.value = '';
+  }
+
+  updateCustomModelVisibility();
+}
+
+function updateCustomModelVisibility() {
+  const select = element('model-name-select');
+  const customWrap = element('model-custom-input-wrap');
+  const customInput = element('model-name-custom-input');
+  if (!select || !customWrap) return;
+
+  const isCustom = select.value === '__custom__';
+  customWrap.hidden = !isCustom;
+  if (isCustom && customInput) {
+    customInput.focus();
+  }
+}
+
+function getSelectedModelName() {
+  const select = element('model-name-select');
+  if (!select) return '';
+  if (select.value === '__custom__') {
+    return element('model-name-custom-input')?.value.trim() || '';
+  }
+  return select.value.trim();
+}
+
+function onModelSelectChange() {
+  updateCustomModelVisibility();
+  const selected = getSelectedModelName();
+  if (selected) {
+    // Auto-sync label to the selected model! (User Image #4 requirement)
+    element('model-label-input').value = selected;
+    enabledModelsForForm.add(selected);
+    renderModelsChecklist();
+  }
+}
+
+function renderModelsChecklist() {
+  const container = element('models-checklist-container');
+  if (!container) return;
+  container.replaceChildren();
+
+  if (availableModelsForForm.length === 0) {
+    container.append(node('div', 'models-empty-hint', '点击上方「拉取模型」或下拉框选择以加载可用模型'));
+    return;
+  }
+
+  const primaryName = getSelectedModelName();
+
+  for (const m of availableModelsForForm) {
+    const isChecked = enabledModelsForForm.has(m);
+    const isPrimary = m === primaryName;
+    const chip = node('label', `model-chip-item ${isChecked ? 'checked' : ''}`);
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = isChecked;
+    checkbox.onchange = (e) => {
+      e.stopPropagation();
+      if (checkbox.checked) {
+        enabledModelsForForm.add(m);
+      } else {
+        enabledModelsForForm.delete(m);
+      }
+      chip.classList.toggle('checked', checkbox.checked);
+    };
+
+    const nameSpan = node('span', 'model-chip-name', m);
+    chip.append(checkbox, nameSpan);
+
+    if (isPrimary) {
+      chip.append(node('span', 'model-chip-tag', '主'));
+    }
+
+    container.append(chip);
+  }
+}
+
+function clearTestStatus() {
+  const el = element('test-status-msg');
+  if (el) { el.hidden = true; el.className = 'test-status-msg'; el.textContent = ''; }
+}
+
+function showTestStatus(type, text) {
+  const el = element('test-status-msg');
+  if (!el) return;
+  el.hidden = false;
+  el.className = `test-status-msg ${type}`;
+  el.textContent = text;
+}
+
+async function testCurrentModel() {
+  const testBtn = element('test-model-btn');
+  testBtn.disabled = true;
+  showTestStatus('loading', '正在测试连通性，发起 ping 探测…');
+
+  const provider = element('model-provider-select').value;
+  const baseURL = element('model-baseurl-input').value.trim();
+  const apiKey = element('model-apikey-input').value.trim();
+  const name = getSelectedModelName();
+  const id = element('edit-model-id').value;
+
+  if (!name) {
+    testBtn.disabled = false;
+    showTestStatus('error', '请先在下拉框选择或输入模型 ID (Model)');
+    element('model-name-select').focus();
+    return;
+  }
+
+  try {
+    const res = await api('/models/test', {
+      provider,
+      baseURL,
+      apiKey: apiKey || undefined,
+      name,
+      id: id || undefined
+    });
+
+    if (res.ok) {
+      showTestStatus('success', `✓ 连通性测试通过！响应延迟: ${res.latencyMs}ms`);
+    } else {
+      showTestStatus('error', `✗ 连接失败: ${res.error || '无法连通指定端点'}`);
+    }
+  } catch (err) {
+    const raw = err.message || '未知错误';
+    const msg = raw.replace(/^(✗\s*测试出错:\s*|✗\s*连接失败:\s*|请求失败:\s*)+/, '');
+    showTestStatus('error', `✗ 测试出错: ${msg}`);
+  } finally {
+    testBtn.disabled = false;
+  }
+}
+
+async function fetchRemoteModelsList() {
+  const btn = element('fetch-remote-models-btn');
+  btn.disabled = true;
+  const prevText = btn.textContent;
+  btn.textContent = '拉取中…';
+
+  let baseURL = element('model-baseurl-input').value.trim();
+  if (baseURL.endsWith('/v')) {
+    baseURL = `${baseURL}1`;
+    element('model-baseurl-input').value = baseURL;
+  }
+  const apiKey = element('model-apikey-input').value.trim();
+  const id = element('edit-model-id').value;
+
+  try {
+    const res = await api('/models/fetch-remote', {
+      baseURL,
+      apiKey: apiKey || undefined,
+      id: id || undefined
+    });
+    const models = Array.isArray(res) ? res : (res?.models || []);
+    if (models.length > 0) {
+      availableModelsForForm = Array.from(new Set([...availableModelsForForm, ...models]));
+      // Enable all fetched models by default
+      models.forEach(m => enabledModelsForForm.add(m));
+      populateModelSelect(availableModelsForForm, models[0]);
+      // Auto-sync label to the selected model
+      element('model-label-input').value = models[0];
+      renderModelsChecklist();
+      showTestStatus('success', `✓ 成功从端点拉取到 ${models.length} 个模型！已勾选并同步至下拉列表`);
+      element('model-name-select').focus();
+    } else {
+      showTestStatus('error', '端点未返回可用模型列表，可切换为「手动输入其它模型 ID」');
+    }
+  } catch (err) {
+    const raw = err.message || '未知错误';
+    const msg = raw.replace(/^(拉取模型失败:\s*)+/, '');
+    showTestStatus('error', `拉取模型失败: ${msg}`);
+    if (msg.includes('API Key') || msg.includes('鉴权') || msg.includes('密钥')) {
+      element('model-apikey-input').focus();
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prevText;
+  }
+}
+
+// Model Event Listeners
+element('open-model-settings')?.addEventListener('click', () => openModelDialog());
+element('popover-open-settings')?.addEventListener('click', () => openModelDialog());
+element('close-model-dialog')?.addEventListener('click', closeModelDialog);
+element('model-label')?.addEventListener('click', toggleModelPopover);
+element('test-model-btn')?.addEventListener('click', testCurrentModel);
+element('fetch-remote-models-btn')?.addEventListener('click', fetchRemoteModelsList);
+element('add-model-btn')?.addEventListener('click', () => resetModelForm(element('model-provider-select')?.value || 'deepseek'));
+element('model-name-select')?.addEventListener('change', onModelSelectChange);
+
+element('model-name-custom-input')?.addEventListener('input', () => {
+  const val = element('model-name-custom-input').value.trim();
+  if (val) {
+    element('model-label-input').value = val;
+    enabledModelsForForm.add(val);
+    renderModelsChecklist();
+  }
+});
+
+element('select-all-models-btn')?.addEventListener('click', () => {
+  availableModelsForForm.forEach(m => enabledModelsForForm.add(m));
+  renderModelsChecklist();
+});
+
+element('deselect-all-models-btn')?.addEventListener('click', () => {
+  const primary = getSelectedModelName();
+  enabledModelsForForm.clear();
+  if (primary) enabledModelsForForm.add(primary);
+  renderModelsChecklist();
+});
+
+element('add-custom-model-chip-btn')?.addEventListener('click', () => {
+  const name = prompt('请输入自定义模型 ID (例如: claude-3-7-sonnet 或 gemini-2.5-pro):');
+  if (!name || !name.trim()) return;
+  const clean = name.trim();
+  if (!availableModelsForForm.includes(clean)) {
+    availableModelsForForm.push(clean);
+  }
+  enabledModelsForForm.add(clean);
+  populateModelSelect(availableModelsForForm, clean);
+  element('model-label-input').value = clean;
+  renderModelsChecklist();
+});
+
+element('model-provider-select')?.addEventListener('change', () => {
+  applyPresetToForm(element('model-provider-select').value);
+});
+
+element('toggle-key-visibility')?.addEventListener('click', () => {
+  const input = element('model-apikey-input');
+  if (input) input.type = input.type === 'password' ? 'text' : 'password';
+});
+
+element('model-baseurl-input')?.addEventListener('blur', () => {
+  const input = element('model-baseurl-input');
+  if (!input) return;
+  let val = input.value.trim().replace(/\/+$/, '');
+  if (val.endsWith('/v')) val += '1';
+  input.value = val;
+});
+
+element('model-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const id = element('edit-model-id').value || undefined;
+  const provider = element('model-provider-select').value;
+  const label = element('model-label-input').value.trim();
+  const name = getSelectedModelName();
+  const baseURL = element('model-baseurl-input').value.trim();
+  const apiKey = element('model-apikey-input').value.trim() || undefined;
+  const isDefault = element('model-default-checkbox').checked;
+
+  if (!name) {
+    showTestStatus('error', '请先在下拉框选择或输入模型 ID (Model)');
+    element('model-name-select').focus();
+    return;
+  }
+
+  const models = Array.from(enabledModelsForForm);
+  if (models.length === 0 && name) {
+    models.push(name);
+  }
+
+  try {
+    const saved = await api('/models', {
+      id,
+      provider,
+      label: label || name,
+      name,
+      models,
+      baseURL,
+      apiKey,
+      isDefault
+    });
+    await loadModels();
+    selectedModelId = saved.id;
+    activeModelName = name;
+    localStorage.setItem('cheese.selectedModel', selectedModelId);
+    localStorage.setItem('cheese.activeModelName', activeModelName);
+    selectModelForEditing(saved.id);
+    showTestStatus('success', `✓ 模型配置已保存！已启用 ${models.length} 个模型`);
+    renderControls();
+  } catch (err) {
+    showTestStatus('error', `保存失败: ${err.message}`);
+  }
+});
+
+element('delete-model-btn')?.addEventListener('click', async () => {
+  const id = element('edit-model-id').value;
+  if (!id) return;
+  if (!confirm('确定要删除此模型配置吗？')) return;
+  try {
+    await api(`/models/${id}/delete`, {});
+    if (selectedModelId === id) {
+      selectedModelId = '';
+      activeModelName = '';
+      localStorage.removeItem('cheese.selectedModel');
+      localStorage.removeItem('cheese.activeModelName');
+    }
+    await loadModels();
+    resetModelForm();
+    renderControls();
+  } catch (err) {
+    showTestStatus('error', `删除失败: ${err.message}`);
+  }
+});
+
+loadModels();
 setInterval(refresh, 2000);
 changeRoute();
 

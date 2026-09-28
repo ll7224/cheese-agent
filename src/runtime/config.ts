@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { parse } from 'dotenv';
 import { CheeseAgentConfigSchema, type CheeseAgentConfig } from '../config/schema.js';
 
-interface Credential { marker: string; file?: string; path?: string[]; env?: string; directory: string }
+interface Credential { marker: string; file?: string; path?: string[]; env?: string; raw?: string; directory: string }
+export interface ModelOverride { provider: string; name: string; baseURL: string; apiKey?: string }
 export interface ConfigSnapshot { id: string; values: CheeseAgentConfig; credentials: Credential[] }
 const secretKey = /apiKey|appSecret|password|token|secret/i;
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -25,7 +26,7 @@ function merge(base: any, override: any): any {
   for (const [key, value] of Object.entries(override)) result[key] = merge(base[key], value);
   return result;
 }
-export function captureConfig(commonDirectory: string, workspace: string): ConfigSnapshot {
+export function captureConfig(commonDirectory: string, workspace: string, modelOverride?: ModelOverride): ConfigSnapshot {
   const credentials: Credential[] = [];
   const read = (directory: string) => {
     const file = ['cheese-agent.config.json', 'super-agent.config.json'].map(name => join(directory, name)).find(existsSync);
@@ -53,6 +54,20 @@ export function captureConfig(commonDirectory: string, workspace: string): Confi
   values.cron.dataDir = resolve(workspace, values.cron.dataDir);
   values.rag.docsDir = resolve(workspace, values.rag.docsDir);
   values.usage.trackingFile = resolve(workspace, values.usage.trackingFile);
+
+  if (modelOverride) {
+    values.model.provider = modelOverride.provider;
+    values.model.name = modelOverride.name;
+    values.model.baseURL = modelOverride.baseURL || values.model.baseURL;
+    if (modelOverride.apiKey) {
+      const marker = `credential:${randomUUID()}`;
+      credentials.push({ marker, raw: modelOverride.apiKey, directory: workspace });
+      values.model.apiKey = marker;
+    } else {
+      values.model.apiKey = '';
+    }
+  }
+
   if (!values.model.apiKey && values.model.provider !== 'mock') {
     const names = values.model.provider === 'dashscope' ? ['DASHSCOPE_API_KEY', 'OPENAI_API_KEY'] : ['OPENAI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY'];
     const env = { ...environment(commonDirectory), ...environment(workspace) };
@@ -74,7 +89,11 @@ export function resolveConfig(snapshot: ConfigSnapshot): CheeseAgentConfig {
       if (!reference) return value;
       let secret: any;
       try {
-        secret = reference.env ? environment(reference.directory)[reference.env] : reference.path!.reduce((current, key) => current?.[key], JSON.parse(readFileSync(reference.file!, 'utf8')));
+        if (reference.raw) {
+          secret = reference.raw;
+        } else {
+          secret = reference.env ? environment(reference.directory)[reference.env] : reference.path!.reduce((current, key) => current?.[key], JSON.parse(readFileSync(reference.file!, 'utf8')));
+        }
         if (typeof secret !== 'string' || !secret) throw new Error();
         return substitute(secret, reference.directory);
       } catch { throw new Error('会话引用的凭据已缺失或不可用'); }

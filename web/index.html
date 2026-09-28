@@ -24,25 +24,15 @@
         <kbd class="shortcut-key">↵</kbd>
       </button>
 
-      <div class="nav-section">
+      <div class="nav-section workspaces-tree-section">
         <div class="section-label">
-          <span>工作目录</span>
-          <span class="label-tag">WORKSPACE</span>
+          <div class="label-heading">
+            <span>工作空间</span>
+            <span class="label-tag">PROJECTS</span>
+          </div>
+          <button class="action-tag-btn" id="add-workspace" type="button" title="接入本机文件夹">＋ 接入</button>
         </div>
-        <label class="workspace-select">
-          <span class="folder-icon" aria-hidden="true">📁</span>
-          <select id="workspaces" aria-label="选择工作目录"></select>
-        </label>
-        <button class="text-button" id="add-workspace" type="button">＋ 接入本机文件夹</button>
-      </div>
-
-      <div class="nav-section recent-section">
-        <div class="section-label">
-          <span>最近会话</span>
-          <span class="label-tag">RECENT</span>
-        </div>
-        <nav id="sessions" class="sessions-list" aria-label="最近会话"></nav>
-        <button class="text-button" id="load-more" type="button" hidden>显示更多会话 ↓</button>
+        <div id="workspaces" class="workspaces-tree" aria-label="工作空间与会话列表"></div>
       </div>
 
       <div class="sidebar-bottom">
@@ -63,6 +53,10 @@
           <span class="crumb-current" id="breadcrumb">总览</span>
         </div>
         <div class="topbar-right">
+          <button class="icon-button model-config-toggle" id="open-model-settings" type="button" aria-label="配置模型与 API Key" title="配置大语言模型与 API Key">
+            <span class="btn-icon" aria-hidden="true">⚡</span>
+            <span class="topbar-btn-text">模型配置</span>
+          </button>
           <button class="icon-button theme-toggle" id="theme-toggle" type="button" aria-label="切换主题风格" title="切换和纸白 / 仪器暗色">
             <span class="theme-icon" aria-hidden="true">☀️</span>
             <span class="theme-text">和纸白</span>
@@ -128,10 +122,29 @@
               <textarea id="prompt" rows="3" placeholder="描述你想要实现的目标、重构的代码或排查的问题…" required></textarea>
               <div class="composer-toolbar">
                 <div class="toolbar-badges">
-                  <span id="model-label" class="badge-capsule">
-                    <span class="mini-core"></span>
-                    <span>Agent</span>
-                  </span>
+                  <div class="model-picker-wrapper">
+                    <button id="model-label" class="badge-capsule model-capsule" type="button" aria-haspopup="true" aria-expanded="false" title="点击切换当前任务模型">
+                      <span class="mini-core"></span>
+                      <span id="current-model-name">Agent</span>
+                      <span class="capsule-arrow">▾</span>
+                    </button>
+                    <div id="model-popover" class="model-popover" hidden>
+                      <div class="popover-header">
+                        <div class="popover-title-row">
+                          <span class="popover-title">切换任务模型</span>
+                          <span id="popover-config-badge" class="popover-config-badge" title="当前 API 配置"></span>
+                        </div>
+                        <div id="popover-config-row" class="popover-config-row">
+                          <label for="popover-config-select" class="popover-sub-label">API 配置:</label>
+                          <select id="popover-config-select" class="popover-config-select"></select>
+                        </div>
+                      </div>
+                      <div id="model-popover-list" class="model-popover-list"></div>
+                      <div class="popover-footer">
+                        <button id="popover-open-settings" type="button" class="popover-settings-btn">⚙️ 管理模型配置…</button>
+                      </div>
+                    </div>
+                  </div>
                   <span id="directory-label" class="badge-capsule directory-capsule" title="任务工作目录"></span>
                 </div>
                 <div class="toolbar-actions">
@@ -251,6 +264,110 @@
       </form>
     </details>
     <p id="directory-error" class="error" role="alert"></p>
+  </dialog>
+
+  <dialog id="model-dialog" class="model-dialog" aria-labelledby="model-dialog-title">
+    <div class="dialog-heading">
+      <div class="dialog-title-group">
+        <span class="dialog-badge">模型服务</span>
+        <h2 id="model-dialog-title">大语言模型与 API Key 配置</h2>
+      </div>
+      <button class="icon-button" type="button" id="close-model-dialog" aria-label="关闭模型配置弹窗">✕</button>
+    </div>
+    <p class="dialog-desc">配置各厂商 API Key 与兼容代理端点。数据加密保存在本机安全文件 (~/.cheese/models.json)，运行时自动打码脱敏。</p>
+
+    <div class="model-manager-layout">
+      <!-- Left side: configured models list -->
+      <div class="model-list-pane">
+        <div class="pane-header">
+          <span class="pane-title">已配置模型</span>
+          <button class="action-tag-btn" id="add-model-btn" type="button">＋ 添加</button>
+        </div>
+        <div id="configured-models-list" class="configured-models-list"></div>
+      </div>
+
+      <!-- Right side: edit / add model form -->
+      <form id="model-form" class="model-form-pane">
+        <input type="hidden" id="edit-model-id">
+        <div class="form-row-grid">
+          <div class="form-row">
+            <label for="model-provider-select">供应商预设 (Provider)</label>
+            <select id="model-provider-select" class="form-select">
+              <option value="deepseek">DeepSeek (深度求索)</option>
+              <option value="openai">OpenAI (官方)</option>
+              <option value="google">Google Gemini</option>
+              <option value="anthropic">Anthropic (Claude 兼容代理)</option>
+              <option value="dashscope">阿里云百炼 (通义千问 Qwen)</option>
+              <option value="ollama">Ollama (本地运行)</option>
+              <option value="custom">自定义 (OpenAI 兼容中转/私有部署)</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label for="model-label-input">显示名称 (Label)</label>
+            <input id="model-label-input" class="form-input" placeholder="例如: CPA Antigravity 或 DeepSeek" required>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label for="model-baseurl-input">API BaseURL</label>
+          <input id="model-baseurl-input" class="form-input" placeholder="https://api.deepseek.com/v1" required>
+        </div>
+
+        <div class="form-row">
+          <label for="model-apikey-input">API Key (密钥)</label>
+          <div class="input-with-action">
+            <input id="model-apikey-input" class="form-input" type="password" placeholder="sk-..." autocomplete="off">
+            <button class="inline-btn" id="toggle-key-visibility" type="button" title="显示/隐藏密钥">👁</button>
+          </div>
+          <span class="field-hint" id="key-hint">修改现有模型时若不修改密钥请留空</span>
+        </div>
+
+        <div class="form-row">
+          <label for="model-name-select">主调模型 ID (Primary Model)</label>
+          <div class="input-with-action">
+            <select id="model-name-select" class="form-select" required>
+              <option value="">-- 请选择或拉取模型 --</option>
+            </select>
+            <button class="inline-btn" id="fetch-remote-models-btn" type="button" title="从 BaseURL 远程拉取已开通模型">拉取模型</button>
+          </div>
+          <div id="model-custom-input-wrap" class="custom-model-wrap" hidden>
+            <input id="model-name-custom-input" class="form-input" placeholder="输入自定义模型 ID，例如: gpt-4o 或 custom-model">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="multi-models-header">
+            <label class="multi-models-title">已启用模型 (多选，勾选后可在聊天栏切换)</label>
+            <div class="multi-models-actions">
+              <button type="button" class="mini-text-btn" id="select-all-models-btn">全选</button>
+              <button type="button" class="mini-text-btn" id="deselect-all-models-btn">清空</button>
+              <button type="button" class="mini-text-btn" id="add-custom-model-chip-btn">＋ 添加模型</button>
+            </div>
+          </div>
+          <div id="models-checklist-container" class="models-checklist-container">
+            <div class="models-empty-hint">点击上方「拉取模型」或下拉框选择以加载可用模型</div>
+          </div>
+          <span class="field-hint">勾选的模型将展示在对话输入框底部的模型切换菜单中</span>
+        </div>
+
+        <div class="form-row-checkbox">
+          <label class="checkbox-label">
+            <input type="checkbox" id="model-default-checkbox">
+            <span>设为全局默认配置</span>
+          </label>
+        </div>
+
+        <div id="test-status-msg" class="test-status-msg" hidden></div>
+
+        <div class="form-actions">
+          <button class="ghost-btn" id="test-model-btn" type="button">测试连通性</button>
+          <div class="form-actions-right">
+            <button class="danger-btn" id="delete-model-btn" type="button" hidden>删除</button>
+            <button class="send-button" type="submit" id="save-model-btn">保存配置</button>
+          </div>
+        </div>
+      </form>
+    </div>
   </dialog>
 
   <script type="module" src="/app.js"></script>

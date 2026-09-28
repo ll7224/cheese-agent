@@ -5,12 +5,14 @@ import { bodyLimit } from 'hono/body-limit';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, join } from 'node:path';
+import { execSync } from 'node:child_process';
 import { Runtime, RuntimeError } from '../runtime/service.js';
 import { acquireServiceLock } from '../runtime/service-lock.js';
 import { captureConfig, resolveConfig } from '../runtime/config.js';
 import { ChannelGateway } from '../channels/gateway.js';
 import { FeishuChannel } from '../channels/feishu.js';
 import { selectLocalDirectory } from './directory-picker.js';
+import { PROVIDER_PRESETS, testConnection, fetchRemoteModels } from '../runtime/model-store.js';
 
 export function createApp(runtime: Runtime, chooseDirectory: () => Promise<string | null> = selectLocalDirectory) {
   const app = new Hono();
@@ -44,6 +46,55 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
     try { return context.json({ path: await chooseDirectory() }); }
     finally { choosingDirectory = false; }
   });
+  app.get('/api/v1/models/presets', context => context.json(PROVIDER_PRESETS));
+  app.get('/api/v1/models', context => context.json(runtime.modelStore.list()));
+  app.post('/api/v1/models', async context => {
+    const body = await context.req.json();
+    return context.json(runtime.modelStore.saveModel(body), 201);
+  });
+  app.delete('/api/v1/models/:id', context => {
+    const success = runtime.modelStore.deleteModel(context.req.param('id'));
+    if (!success) throw new RuntimeError('模型配置不存在', 404);
+    return context.json({ success: true });
+  });
+  app.post('/api/v1/models/:id/delete', context => {
+    const success = runtime.modelStore.deleteModel(context.req.param('id'));
+    if (!success) throw new RuntimeError('模型配置不存在', 404);
+    return context.json({ success: true });
+  });
+  app.post('/api/v1/models/:id/set-default', context => {
+    const success = runtime.modelStore.setDefault(context.req.param('id'));
+    if (!success) throw new RuntimeError('模型配置不存在', 404);
+    return context.json({ success: true });
+  });
+  app.post('/api/v1/models/test', async context => {
+    const body = await context.req.json();
+    let { provider, baseURL, apiKey, name, id } = body;
+    if (id) {
+      const stored = runtime.modelStore.get(id);
+      if (stored) {
+        provider = provider || stored.provider;
+        baseURL = baseURL || stored.baseURL;
+        apiKey = (apiKey !== undefined && apiKey !== '') ? apiKey : stored.apiKey;
+        name = name || stored.name;
+      }
+    }
+    return context.json(await testConnection({ provider, baseURL, apiKey, name }));
+  });
+  app.post('/api/v1/models/fetch-remote', async context => {
+    const body = await context.req.json();
+    let { baseURL, apiKey, id } = body;
+    if (id) {
+      const stored = runtime.modelStore.get(id);
+      if (stored) {
+        baseURL = baseURL || stored.baseURL;
+        apiKey = (apiKey !== undefined && apiKey !== '') ? apiKey : stored.apiKey;
+      }
+    }
+    const models = await fetchRemoteModels({ baseURL, apiKey });
+    return context.json({ models });
+  });
+
   app.get('/api/v1/sessions', context => {
     const offset = Number(context.req.query('offset') || 0);
     const requestedLimit = Number(context.req.query('limit') || 50);
@@ -51,7 +102,10 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
     const limit = Math.min(100, requestedLimit);
     return context.json(runtime.state.sessions.filter(session => session.workspaceId === context.req.query('workspaceId')).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(offset, offset + limit).map(({ messages, ...session }) => ({ ...session, run: runtime.state.runs.filter(run => run.sessionId === session.id).at(-1) })));
   });
-  app.post('/api/v1/sessions', async context => context.json(runtime.createSession((await context.req.json()).workspaceId), 201));
+  app.post('/api/v1/sessions', async context => {
+    const body = await context.req.json();
+    return context.json(runtime.createSession(body.workspaceId, body.modelId), 201);
+  });
   app.get('/api/v1/sessions/:id', context => context.json({ ...runtime.session(context.req.param('id')), runs: runtime.state.runs.filter(run => run.sessionId === context.req.param('id')), events: runtime.state.events.filter(event => event.sessionId === context.req.param('id')) }));
   app.get('/api/v1/runs/:id/events', context => {
     const id = context.req.param('id');
@@ -80,7 +134,25 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
   return app;
 }
 
+export function autoDetectSystemProxy() {
+  if (process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy) return;
+  if (process.platform === 'darwin') {
+    try {
+      const out = execSync('scutil --proxy', { encoding: 'utf8', timeout: 1000 });
+      const httpsMatch = out.match(/HTTPSEnable\s*:\s*1[^]*?HTTPSPort\s*:\s*(\d+)[^]*?HTTPSProxy\s*:\s*([^\s\n]+)/);
+      const httpMatch = out.match(/HTTPEnable\s*:\s*1[^]*?HTTPPort\s*:\s*(\d+)[^]*?HTTPProxy\s*:\s*([^\s\n]+)/);
+      const target = httpsMatch || httpMatch;
+      if (target) {
+        const proxyUrl = `http://${target[2]}:${target[1]}`;
+        process.env.HTTPS_PROXY = proxyUrl;
+        process.env.HTTP_PROXY = proxyUrl;
+      }
+    } catch {}
+  }
+}
+
 export async function startWeb() {
+  autoDetectSystemProxy();
   const port = Number(process.env.CHEESE_PORT || 3210);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('无效端口');
   const dataDir = resolve(process.env.CHEESE_DATA_DIR || join(homedir(), '.cheese-agent'));
