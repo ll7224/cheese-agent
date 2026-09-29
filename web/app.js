@@ -23,6 +23,9 @@ let activeModelName = localStorage.getItem('cheese.activeModelName') || '';
 let editingModelId = null;
 let availableModelsForForm = [];
 let enabledModelsForForm = new Set();
+let availableSkills = [];
+let currentSessionSkills = [];
+let slashSelectedIndex = 0;
 
 const node = (tag, className, text) => {
   const result = document.createElement(tag);
@@ -202,7 +205,10 @@ function connection(connected) {
 
 function draftKey() { return `cheese.draft.${sessionId || `home-${workspaceId}`}`; }
 function restoreDraft() { element('prompt').value = sessionStorage.getItem(draftKey()) || ''; }
-element('prompt').addEventListener('input', () => sessionStorage.setItem(draftKey(), element('prompt').value));
+element('prompt').addEventListener('input', () => {
+  sessionStorage.setItem(draftKey(), element('prompt').value);
+  updateSlashAutocomplete();
+});
 
 function navigate(id = '') {
   sessionId = id;
@@ -219,7 +225,13 @@ function changeRoute() {
   if (!sessionId) {
     currentSession = undefined;
     currentRun = undefined;
+    currentSessionSkills = [];
+  } else if (currentSession) {
+    currentSessionSkills = currentSession.activeSkills || [];
   }
+  closeModelPopover();
+  closeSkillPopover();
+  if (element('slash-autocomplete')) element('slash-autocomplete').hidden = true;
   messagesSignature = '';
   eventSource?.close(); eventSource = undefined; streamingRun = undefined; events.clear(); element('events').replaceChildren();
   element('error').hidden = true;
@@ -270,6 +282,7 @@ function renderControls() {
   element('directory-label').textContent = workspace?.name || '请接入目录';
   element('directory-label').title = workspace?.path || '';
   updateModelCapsuleDisplay();
+  renderSkillCapsule();
   element('run-status').textContent = currentRun ? labels[currentRun.status] || currentRun.status : '准备好开始了';
 
   const liveBadge = element('live-model-badge');
@@ -493,11 +506,13 @@ async function refresh() {
     if (!workspaces.some(workspace => workspace.id === workspaceId)) workspaceId = workspaces[0]?.id || '';
     if (workspaceId) expandedWorkspaces.add(workspaceId);
     localStorage.setItem('cheese.workspace', workspaceId);
+    if (workspaceId && availableSkills.length === 0) loadSkills(workspaceId);
 
     currentSession = session;
     currentRun = session?.runs.at(-1);
     element('breadcrumb').textContent = session ? session.title : '总览';
     if (session) {
+      currentSessionSkills = session.activeSkills || [];
       element('session-title').textContent = session.title;
       element('session-meta').textContent = `${workspaces.find(workspace => workspace.id === workspaceId)?.path || ''} · ${session.config?.values?.model?.name || 'Agent'}`;
       renderMessages(session);
@@ -638,6 +653,7 @@ element('composer').addEventListener('submit', async event => {
   event.preventDefault();
   const text = element('prompt').value.trim();
   if (!text || submitting || active(currentRun?.status)) return;
+  if (element('slash-autocomplete')) element('slash-autocomplete').hidden = true;
   submitting = true; renderControls(); element('error').hidden = true;
   const previousDraft = draftKey();
   try {
@@ -645,6 +661,9 @@ element('composer').addEventListener('submit', async event => {
       const sessionPayload = { workspaceId };
       if (selectedModelId) {
         sessionPayload.modelId = activeModelName ? `${selectedModelId}:${activeModelName}` : selectedModelId;
+      }
+      if (currentSessionSkills && currentSessionSkills.length > 0) {
+        sessionPayload.activeSkills = currentSessionSkills;
       }
       const session = await api('/sessions', sessionPayload);
       sessionId = session.id;
@@ -664,6 +683,42 @@ element('composer').addEventListener('submit', async event => {
 });
 
 element('prompt').addEventListener('keydown', event => {
+  const autoEl = element('slash-autocomplete');
+  const isAutoOpen = autoEl && !autoEl.hidden;
+
+  if (isAutoOpen) {
+    const items = autoEl.querySelectorAll('.slash-item');
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      slashSelectedIndex = (slashSelectedIndex + 1) % items.length;
+      updateSlashAutocomplete(true);
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      slashSelectedIndex = (slashSelectedIndex - 1 + items.length) % items.length;
+      updateSlashAutocomplete(true);
+      return;
+    }
+    if ((event.key === 'Enter' || event.key === 'Tab') && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault();
+      const selectedItem = items[slashSelectedIndex];
+      if (selectedItem) {
+        const cmdText = selectedItem.querySelector('.slash-item-cmd')?.textContent || '';
+        const skillName = cmdText.replace(/^\//, '');
+        if (skillName) {
+          selectSlashSkill(skillName);
+          return;
+        }
+      }
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      autoEl.hidden = true;
+      return;
+    }
+  }
+
   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
     event.preventDefault();
     element('composer').requestSubmit();
@@ -1018,7 +1073,10 @@ function toggleModelPopover() {
   const willOpen = popover.hidden;
   popover.hidden = !willOpen;
   btn.setAttribute('aria-expanded', String(willOpen));
-  if (willOpen) renderModelPicker();
+  if (willOpen) {
+    closeSkillPopover();
+    renderModelPicker();
+  }
 }
 
 function closeModelPopover() {
@@ -1028,9 +1086,213 @@ function closeModelPopover() {
   if (btn) btn.setAttribute('aria-expanded', 'false');
 }
 
+/* --- Skill Management & Popover --- */
+async function loadSkills(targetWorkspaceId = workspaceId) {
+  try {
+    const query = targetWorkspaceId ? `?workspaceId=${encodeURIComponent(targetWorkspaceId)}` : '';
+    const res = await api(`/skills${query}`);
+    availableSkills = res.skills || [];
+    renderSkillCapsule();
+    renderQuickPrompts();
+  } catch (err) {
+    console.warn('加载技能列表失败:', err);
+  }
+}
+
+function renderQuickPrompts() {
+  const container = document.querySelector('.quick-prompts');
+  if (!container) return;
+  container.querySelectorAll('.skill-prompt-card').forEach(c => c.remove());
+
+  for (const skill of availableSkills) {
+    const card = node('button', 'prompt-card skill-prompt-card');
+    card.type = 'button';
+    card.dataset.prompt = `/${skill.name} `;
+
+    const header = node('div', 'card-header');
+    header.append(node('span', 'card-icon', '✨'), node('span', 'card-arrow', '↗'));
+
+    const title = node('strong', 'card-title', `/${skill.name}`);
+    const desc = node('span', 'card-desc', skill.description || '加载此技能 SOP 指令');
+
+    card.append(header, title, desc);
+    card.onclick = () => {
+      element('prompt').value = `/${skill.name} `;
+      element('prompt').dispatchEvent(new Event('input'));
+      element('prompt').focus();
+    };
+    container.append(card);
+  }
+}
+
+function renderSkillCapsule() {
+  const labelBtn = element('skill-label');
+  const textEl = element('current-skill-text');
+  if (!labelBtn || !textEl) return;
+
+  const activeList = currentSession?.activeSkills ?? currentSessionSkills;
+  const count = activeList.length;
+  textEl.textContent = `技能 (${count})`;
+  labelBtn.classList.toggle('has-active', count > 0);
+  labelBtn.title = count > 0
+    ? `已启用 ${count} 个技能: ${activeList.join(', ')} · 点击管理`
+    : '配置当前会话启用的技能 (Skills) · 点击选择';
+
+  const badgeEl = element('skill-count-badge');
+  if (badgeEl) {
+    badgeEl.textContent = `${count} 已启用`;
+  }
+}
+
+function renderSkillPicker() {
+  const listEl = element('skill-popover-list');
+  if (!listEl) return;
+  listEl.replaceChildren();
+
+  const activeSet = new Set(currentSession?.activeSkills ?? currentSessionSkills);
+
+  if (availableSkills.length === 0) {
+    const empty = node('div', 'skill-empty-hint');
+    empty.innerHTML = '暂无可用技能。<br>在工作区 <code>.skills/&lt;name&gt;/SKILL.md</code> 或全局 <code>~/.cheese/skills/</code> 中定义技能。';
+    listEl.append(empty);
+    return;
+  }
+
+  for (const skill of availableSkills) {
+    const isChecked = activeSet.has(skill.name);
+    const item = node('label', `skill-item ${isChecked ? 'active' : ''}`);
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'skill-item-checkbox';
+    checkbox.checked = isChecked;
+
+    checkbox.onchange = async () => {
+      if (checkbox.checked) {
+        activeSet.add(skill.name);
+      } else {
+        activeSet.delete(skill.name);
+      }
+      const updatedList = Array.from(activeSet);
+      currentSessionSkills = updatedList;
+
+      if (currentSession?.id) {
+        try {
+          const updatedSession = await api(`/sessions/${currentSession.id}/skills`, { skills: updatedList });
+          currentSession.activeSkills = updatedSession.activeSkills || updatedList;
+        } catch (err) {
+          report(err);
+          checkbox.checked = !checkbox.checked;
+          return;
+        }
+      }
+      renderSkillCapsule();
+      renderSkillPicker();
+    };
+
+    const content = node('div', 'skill-item-content');
+    const header = node('div', 'skill-item-header');
+    const name = node('span', 'skill-item-name', `/${skill.name}`);
+    const sourceTag = node('span', `skill-source-tag ${skill.source || 'workspace'}`, skill.source === 'global' ? '全局' : '工作区');
+    header.append(name, sourceTag);
+
+    content.append(header);
+    if (skill.description) {
+      content.append(node('span', 'skill-item-desc', skill.description));
+    }
+    if (skill.whenToUse) {
+      content.append(node('span', 'skill-item-when', `适用: ${skill.whenToUse}`));
+    }
+
+    item.append(checkbox, content);
+    listEl.append(item);
+  }
+}
+
+function toggleSkillPopover() {
+  const popover = element('skill-popover');
+  const btn = element('skill-label');
+  if (!popover || !btn) return;
+  const willOpen = popover.hidden;
+  popover.hidden = !willOpen;
+  btn.setAttribute('aria-expanded', String(willOpen));
+  if (willOpen) {
+    closeModelPopover();
+    renderSkillPicker();
+  }
+}
+
+function closeSkillPopover() {
+  const popover = element('skill-popover');
+  const btn = element('skill-label');
+  if (popover) popover.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function updateSlashAutocomplete(keepIndex = false) {
+  const promptEl = element('prompt');
+  const autoEl = element('slash-autocomplete');
+  if (!promptEl || !autoEl) return;
+
+  const val = promptEl.value;
+  if (val.startsWith('/') && !val.includes(' ') && !val.includes('\n')) {
+    const query = val.slice(1).toLowerCase();
+    const matched = availableSkills.filter(s =>
+      s.name.toLowerCase().includes(query) ||
+      (s.description && s.description.toLowerCase().includes(query))
+    );
+
+    if (matched.length > 0) {
+      if (!keepIndex) slashSelectedIndex = 0;
+      slashSelectedIndex = Math.max(0, Math.min(slashSelectedIndex, matched.length - 1));
+      autoEl.replaceChildren();
+
+      matched.forEach((skill, idx) => {
+        const item = node('button', `slash-item ${idx === slashSelectedIndex ? 'selected' : ''}`);
+        item.type = 'button';
+
+        const cmd = node('span', 'slash-item-cmd', `/${skill.name}`);
+        const desc = node('span', 'slash-item-desc', skill.description || '');
+        const src = node('span', `skill-source-tag ${skill.source || 'workspace'}`, skill.source === 'global' ? '全局' : '工作区');
+
+        item.append(cmd, desc, src);
+
+        item.onmousedown = (e) => {
+          e.preventDefault();
+          selectSlashSkill(skill.name);
+        };
+
+        autoEl.append(item);
+      });
+
+      autoEl.hidden = false;
+      return;
+    }
+  }
+
+  autoEl.hidden = true;
+}
+
+function selectSlashSkill(skillName) {
+  const promptEl = element('prompt');
+  const autoEl = element('slash-autocomplete');
+  promptEl.value = `/${skillName} `;
+  sessionStorage.setItem(draftKey(), promptEl.value);
+  if (autoEl) autoEl.hidden = true;
+  promptEl.focus();
+}
+
 document.addEventListener('click', event => {
-  const wrapper = event.target.closest('.model-picker-wrapper');
-  if (!wrapper) closeModelPopover();
+  const modelWrapper = event.target.closest('.model-picker-wrapper');
+  if (!modelWrapper) closeModelPopover();
+
+  const skillWrapper = event.target.closest('.skill-picker-wrapper');
+  if (!skillWrapper) closeSkillPopover();
+
+  if (!event.target.closest('#prompt') && !event.target.closest('#slash-autocomplete')) {
+    const autoEl = element('slash-autocomplete');
+    if (autoEl) autoEl.hidden = true;
+  }
 });
 
 async function openModelDialog(modelToEditId) {
@@ -1375,6 +1637,7 @@ element('open-model-settings')?.addEventListener('click', () => openModelDialog(
 element('popover-open-settings')?.addEventListener('click', () => openModelDialog());
 element('close-model-dialog')?.addEventListener('click', closeModelDialog);
 element('model-label')?.addEventListener('click', toggleModelPopover);
+element('skill-label')?.addEventListener('click', toggleSkillPopover);
 element('test-model-btn')?.addEventListener('click', testCurrentModel);
 element('fetch-remote-models-btn')?.addEventListener('click', fetchRemoteModelsList);
 element('add-model-btn')?.addEventListener('click', () => resetModelForm(element('model-provider-select')?.value || 'deepseek'));
@@ -1502,6 +1765,7 @@ element('delete-model-btn')?.addEventListener('click', async () => {
 });
 
 loadModels();
+loadSkills();
 setInterval(refresh, 2000);
 changeRoute();
 

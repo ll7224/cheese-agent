@@ -2,7 +2,7 @@ import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { Executor } from './service.js';
 
-export const executeWorker: Executor = ({ cwd, messages, config, emit, acquireChild, manageCron, signal }) => new Promise((resolve, reject) => {
+export const executeWorker: Executor = ({ cwd, messages, config, activeSkills, emit, acquireChild, manageCron, signal }) => new Promise((resolve, reject) => {
   signal?.throwIfAborted();
   const extension = import.meta.url.endsWith('.ts') ? 'ts' : 'js';
   const worker = fork(fileURLToPath(new URL(`./worker.${extension}`, import.meta.url)), [], {
@@ -57,5 +57,5 @@ export const executeWorker: Executor = ({ cwd, messages, config, emit, acquireCh
     permits.forEach(release => release());
     result && code === 0 ? resolve(result) : reject(new Error(failure || `Agent 进程退出 (${code})`));
   });
-  worker.send({ messages, config });
+  worker.send({ messages, config, activeSkills });
 });

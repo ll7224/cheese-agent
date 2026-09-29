@@ -1,6 +1,6 @@
 export interface AgentEvent { type: string; [key: string]: unknown }
 export interface ExecutionEvent extends AgentEvent { id: string; runId: string; sessionId: string; workspaceId: string; sequence: number; timestamp: string }
-export interface ExecutionOptions { emit?: (event: AgentEvent) => void; signal?: AbortSignal; acquireChild?: (id: string) => Promise<() => void>; manageCron?: (input: any) => Promise<unknown> }
+export interface ExecutionOptions { emit?: (event: AgentEvent) => void; signal?: AbortSignal; acquireChild?: (id: string) => Promise<() => void>; manageCron?: (input: any) => Promise<unknown>; activeSkills?: string[] }
 
 export function redact(value: any, secrets: string[] = []): any {
   if (typeof value === 'string') {

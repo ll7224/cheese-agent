@@ -142,6 +142,7 @@
             <form id="composer" class="composer-form">
               <label class="sr-only" for="prompt">描述你的任务</label>
               <textarea id="prompt" rows="3" placeholder="描述你想要实现的目标、重构的代码或排查的问题…" required></textarea>
+              <div id="slash-autocomplete" class="slash-autocomplete" hidden aria-label="技能自动补全菜单"></div>
               <div class="composer-toolbar">
                 <div class="toolbar-badges">
                   <div class="model-picker-wrapper">
@@ -165,6 +166,23 @@
                       <div class="popover-footer">
                         <button id="popover-open-settings" type="button" class="popover-settings-btn">⚙️ 管理模型配置…</button>
                       </div>
+                    </div>
+                  </div>
+                  <div class="skill-picker-wrapper">
+                    <button id="skill-label" class="badge-capsule skill-capsule" type="button" aria-haspopup="true" aria-expanded="false" title="配置当前会话启用的技能 (Skills)">
+                      <span class="skill-icon">✨</span>
+                      <span id="current-skill-text">技能 (0)</span>
+                      <span class="capsule-arrow">▾</span>
+                    </button>
+                    <div id="skill-popover" class="skill-popover" hidden>
+                      <div class="popover-header">
+                        <div class="popover-title-row">
+                          <span class="popover-title">配置会话技能</span>
+                          <span id="skill-count-badge" class="popover-config-badge">0 已启用</span>
+                        </div>
+                        <p class="popover-desc">启用的技能 SOP 将直接注入系统提示词</p>
+                      </div>
+                      <div id="skill-popover-list" class="skill-popover-list"></div>
                     </div>
                   </div>
                   <span id="directory-label" class="badge-capsule directory-capsule" title="任务工作目录"></span>

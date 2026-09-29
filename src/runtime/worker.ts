@@ -24,6 +24,7 @@ process.once('message', async (request: any) => {
     }
     const { runTask } = await import('../main.js');
     await runTask(request.messages, {
+      activeSkills: request.activeSkills,
       signal: controller.signal,
       manageCron: input => new Promise((resolve, reject) => {
         controller.signal.throwIfAborted();

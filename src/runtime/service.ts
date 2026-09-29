@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, realpathSync, statSync, accessSync, constants, copyFileSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
+import { homedir } from 'node:os';
 import type { ModelMessage } from 'ai';
 import { executeWorker } from './worker-client.js';
 import { captureConfig, resolveConfig, type ConfigSnapshot } from './config.js';
@@ -13,7 +14,7 @@ import { ModelStore, type StoredModel, type MaskedModel, testConnection, fetchRe
 import type { CheeseAgentConfig } from '../config/schema.js';
 
 export interface Workspace { id: string; path: string; name: string }
-export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot; source?: string; modelId?: string }
+export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot; source?: string; modelId?: string; activeSkills?: string[] }
 export interface Run { id: string; sessionId: string; key: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'stopping' | 'cancelled' | 'interrupted'; error?: string; messageOffset?: number; input?: string }
 interface State { workspaces: Workspace[]; sessions: Session[]; runs: Run[]; events: ExecutionEvent[] }
 function readState(file: string): State {
@@ -22,7 +23,7 @@ function readState(file: string): State {
   if (state.workspaces.some((workspace: any) => !workspace?.id || typeof workspace.path !== 'string') || state.sessions.some((session: any) => !session?.id || !Array.isArray(session.messages) || !state.workspaces.some((workspace: any) => workspace.id === session.workspaceId)) || state.runs.some((run: any) => !run?.id || !state.sessions.some((session: any) => session.id === run.sessionId))) throw new Error('会话快照关联已损坏');
   return state;
 }
-export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void>; manageCron: (input: any) => Promise<unknown>; signal: AbortSignal }
+export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; activeSkills?: string[]; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void>; manageCron: (input: any) => Promise<unknown>; signal: AbortSignal }
 export type Executor = (execution: Execution) => Promise<ModelMessage[]>;
 export class RuntimeError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -140,7 +141,7 @@ export class Runtime {
     catch { return false; }
   }
 
-  createSession(workspaceId: string, modelId?: string) {
+  createSession(workspaceId: string, modelId?: string, activeSkills: string[] = []) {
     if (!this.available(this.workspace(workspaceId))) throw new RuntimeError('工作目录已不可用');
     const defaultModel = this.modelStore.getDefault();
     const isModelUsable = (m?: StoredModel) => Boolean(m && (m.apiKey || m.provider === 'ollama' || m.provider === 'mock'));
@@ -154,6 +155,7 @@ export class Runtime {
       try { this.cron(workspaceId, config.values); }
       catch { console.warn(`目录 ${this.workspace(workspaceId).path} 的定时任务未启动，请检查目录配置；普通会话不受影响`); }
     }
+    const cleanSkills = Array.from(new Set(Array.isArray(activeSkills) ? activeSkills.filter(s => typeof s === 'string' && s.trim()) : []));
     const session: Session = {
       id: randomUUID(),
       workspaceId,
@@ -161,9 +163,26 @@ export class Runtime {
       updatedAt: new Date().toISOString(),
       messages: [],
       config,
-      modelId: modelId || selectedModel?.id
+      modelId: modelId || selectedModel?.id,
+      activeSkills: cleanSkills,
     };
     this.state.sessions.push(session);
+    this.save();
+    return session;
+  }
+
+  updateSessionSkills(sessionId: string, skills: string[]): Session {
+    const session = this.session(sessionId);
+    if (!this.available(this.workspace(session.workspaceId))) throw new RuntimeError('工作目录已不可用');
+    if (this.state.runs.some(r => r.sessionId === sessionId && ['queued', 'running', 'stopping'].includes(r.status))) {
+      throw new RuntimeError('会话正在执行任务，请等待完成后再更新技能配置', 409);
+    }
+    if (!Array.isArray(skills)) {
+      throw new RuntimeError('技能列表必须为数组');
+    }
+    const cleanSkills = Array.from(new Set(skills.filter(s => typeof s === 'string' && s.trim())));
+    session.activeSkills = cleanSkills;
+    session.updatedAt = new Date().toISOString();
     this.save();
     return session;
   }
@@ -302,7 +321,7 @@ export class Runtime {
       const config = session.config ? resolveConfig(session.config) : undefined;
       secrets = collectSecrets(config);
       stream = redactStream(secrets, event => this.emit(run, { ...event, ...(event.childRunId ? { rootRunId: run.id, parentRunId: run.id } : {}) }, secrets));
-      const resultMessages = await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, emit: event => stream!.push(event), acquireChild: () => this.children.acquire(controller.signal), manageCron: input => { controller.signal.throwIfAborted(); return this.manageCron(workspace.id, input, config); }, signal: controller.signal });
+      const resultMessages = await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, activeSkills: session.activeSkills || [], emit: event => stream!.push(event), acquireChild: () => this.children.acquire(controller.signal), manageCron: input => { controller.signal.throwIfAborted(); return this.manageCron(workspace.id, input, config); }, signal: controller.signal });
       const currentModelName = config?.model?.name || session.config?.values?.model?.name;
       const reasoningEvents = this.events(run.id).filter(e => e.type === 'reasoning');
       const reasoningText = reasoningEvents.map(e => String(e.text || '')).join('');

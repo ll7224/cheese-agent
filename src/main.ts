@@ -396,6 +396,26 @@ export async function startAgent() {
 
 export async function runTask(messages: ModelMessage[], options: ExecutionOptions = {}) {
   await connectMCP();
+  skillLoader.load();
+  if (options.activeSkills) {
+    activeSkills.clear();
+    for (const s of options.activeSkills) activeSkills.add(s);
+  }
+
+  // 支持输入形如 /<skill-name> [args] 的一次性快捷触发
+  const lastUserMsg = messages[messages.length - 1];
+  if (lastUserMsg && lastUserMsg.role === 'user' && typeof lastUserMsg.content === 'string' && lastUserMsg.content.startsWith('/')) {
+    const trimmed = lastUserMsg.content.trim();
+    const parts = trimmed.slice(1).split(/\s+/);
+    const skillName = parts[0];
+    const skill = skillLoader.get(skillName);
+    if (skill) {
+      activeSkills.add(skillName);
+      const args = parts.slice(1).join(' ');
+      lastUserMsg.content = args ? `${skill.content}\n\n用户指令: ${args}` : skill.content;
+    }
+  }
+
   registry.register(createSpawnTool(agentRegistry, () => ({ ...getSpawnCtx(), ...options })));
   if (options.manageCron) registry.register({ ...createCronTool(cronService), execute: options.manageCron });
   try {
