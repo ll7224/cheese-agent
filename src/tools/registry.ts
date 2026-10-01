@@ -121,6 +121,16 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
+  fork(excluded = new Set<string>(), allowed?: string[]): ToolRegistry {
+    const registry = new ToolRegistry();
+    registry.register(...this.getAll().filter(tool => !excluded.has(tool.name) && (!allowed || allowed.includes(tool.name))));
+    registry.activeProfile = this.activeProfile;
+    registry.currentRole = this.currentRole;
+    registry.discoveredTools = new Set(this.discoveredTools);
+    registry.hookPipeline = this.hookPipeline;
+    return registry;
+  }
+
   getActiveTools(): ToolDefinition[] {
     return this.getAll().filter(tool => {
       if (tool.profile && !tool.profile.includes(this.activeProfile)) {
@@ -224,7 +234,7 @@ export class ToolRegistry {
     for (const resolve of waiting) resolve();
   }
 
-  toAISDKFormat(): Record<string, any> {
+  toAISDKFormat(signal?: AbortSignal): Record<string, any> {
     const result: Record<string, any> = {};
     const activeTools = this.getActiveTools();
 
@@ -242,6 +252,7 @@ export class ToolRegistry {
         inputSchema: jsonSchema(tool.parameters as any),
         execute: async (input: any) => {
           // Bash 风险检测
+          signal?.throwIfAborted();
           if (toolName === 'bash' && input?.command) {
             const risk = classifyBashCommand(input.command);
             if (risk.level === 'dangerous') {
@@ -269,6 +280,7 @@ export class ToolRegistry {
             await registry.acquireExclusive();
           }
           try {
+            signal?.throwIfAborted();
             const raw = await executeFn(input);
             const text = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
             let output = truncateResult(text, maxChars);

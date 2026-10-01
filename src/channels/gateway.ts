@@ -1,12 +1,12 @@
 import type { ModelMessage } from 'ai';
 import type { ChannelDefinition, IncomingMessage, OutgoingMessage } from './types.js';
 import type { ToolRegistry } from '../tools/registry.js';
-import { agentLoop } from '../agent/loop.js';
+import { executeAgent as agentLoop } from '../runtime/execution.js';
 
 /**
  * 网关构造参数选项
  */
-interface GatewayOptions {
+interface LegacyGatewayOptions {
   /** LLM 模型实例 */
   model: any;
   /** 全局工具注册表引用 */
@@ -14,6 +14,8 @@ interface GatewayOptions {
   /** 动态构建系统 Prompt 的回调函数 */
   buildSystem: () => string;
 }
+
+type GatewayOptions = LegacyGatewayOptions | { run: (channelName: string, message: IncomingMessage) => Promise<string> };
 
 /**
  * 跨平台消息通道统一网关（ChannelGateway）。
@@ -50,7 +52,7 @@ export class ChannelGateway {
 
     // 绑定事件驱动回调：当通道收到外部新消息时，转发给 handleIncoming 统一处理
     channel.onMessage?.((msg: IncomingMessage) => {
-      this.handleIncoming(channel.name, msg);
+      void this.handleIncoming(channel.name, msg).catch(error => console.error(`[${channel.name}] 执行失败: ${error instanceof Error ? error.message : String(error)}`));
     });
   }
 
@@ -85,6 +87,11 @@ export class ChannelGateway {
    * @param msg 统一规范化的进站消息体
    */
   private async handleIncoming(channelName: string, msg: IncomingMessage): Promise<void> {
+    if ('run' in this.options) {
+      const text = await this.options.run(channelName, msg);
+      if (text) await this.channels.get(channelName)?.send({ channelId: msg.channelId, recipientId: msg.senderId, text });
+      return;
+    }
     // 1. 生成基于渠道 + 发送者唯一标识的会话隔离 Key（实现多渠道单人状态隔离）
     const sessionKey = `${channelName}:${msg.senderId}`;
     console.log(`\n  [${channelName}] ${msg.senderName}: ${msg.text}`);

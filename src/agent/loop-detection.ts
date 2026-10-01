@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 // --- 类型定义 ---
 
@@ -81,12 +82,14 @@ export function hashResult(result: unknown): string {
 
 // --- 滑动窗口状态存储 ---
 
-const history: ToolCallRecord[] = [];
+const histories = new AsyncLocalStorage<ToolCallRecord[]>();
+const fallbackHistory: ToolCallRecord[] = [];
 
 /**
  * 记录一次新工具调用的发起（写入滑动窗口，维持队列大小上限）
  */
 export function recordCall(toolName: string, params: unknown): void {
+  const history = histories.getStore() || fallbackHistory;
   history.push({
     toolName,
     argsHash: hashToolCall(toolName, params),
@@ -100,6 +103,7 @@ export function recordCall(toolName: string, params: unknown): void {
  * 逆序查找历史记录中第一个尚未填充 resultHash 的对应调用并记录。
  */
 export function recordResult(toolName: string, params: unknown, result: unknown): void {
+  const history = histories.getStore() || fallbackHistory;
   const argsHash = hashToolCall(toolName, params);
   const resultH = hashResult(result);
   for (let i = history.length - 1; i >= 0; i--) {
@@ -114,7 +118,7 @@ export function recordResult(toolName: string, params: unknown, result: unknown)
  * 重置历史调用记录（在每次 Agent 新一轮对话开始时调用）
  */
 export function resetHistory(): void {
-  history.length = 0;
+  histories.enterWith([]);
 }
 
 // --- 核心检测算法 ---
@@ -124,6 +128,7 @@ export function resetHistory(): void {
  * 计算从最近一次往前看，同一工具+相同参数连续调用且返回结果指纹完全相同的次数。
  */
 function getNoProgressStreak(toolName: string, argsHash: string): number {
+  const history = histories.getStore() || fallbackHistory;
   let streak = 0;
   let lastResultHash: string | undefined;
 
@@ -147,6 +152,7 @@ function getNoProgressStreak(toolName: string, argsHash: string): number {
  * 识别形态如：A -> B -> A -> B -> A 的交替调用震荡。
  */
 function getPingPongCount(currentHash: string): number {
+  const history = histories.getStore() || fallbackHistory;
   if (history.length < 3) return 0;
 
   const last = history[history.length - 1];
@@ -177,6 +183,7 @@ function getPingPongCount(currentHash: string): number {
  * 综合评估三种异常模式：无进展重复 -> 乒乓振荡 -> 频次异常。
  */
 export function detect(toolName: string, params: unknown): DetectionResult {
+  const history = histories.getStore() || fallbackHistory;
   const argsHash = hashToolCall(toolName, params);
 
   // 1. 检测无进展重复（结果恒定不变）

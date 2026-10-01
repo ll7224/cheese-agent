@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f8fa">
+  <title>Cheese Agent — 本机开发工作台</title>
+  <script>
+    (function() {
+      try {
+        var mode = localStorage.getItem('cheese.theme.mode') || 'auto';
+        var h = new Date().getHours();
+        var theme = mode === 'auto' ? (h >= 6 && h < 18 ? 'light' : 'dark') : mode;
+        document.documentElement.dataset.theme = theme;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.content = theme === 'dark' ? '#141518' : '#f8f8fa';
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar" aria-label="会话导航">
+      <a class="brand" href="#" aria-label="Cheese Agent">
+        <span class="brand-mark" aria-hidden="true">🧀</span>
+        <span class="brand-info">
+          <span class="brand-name">Cheese</span>
+          <span class="brand-sub">LOCAL AGENT</span>
+        </span>
+      </a>
+
+      <button class="new-task" id="new-task" type="button">
+        <span class="new-task-icon">＋</span>
+        <span>新建任务</span>
+        <kbd class="shortcut-key">↵</kbd>
+      </button>
+
+      <div class="nav-section workspaces-tree-section">
+        <div class="section-label">
+          <div class="label-heading">
+            <span>工作空间</span>
+            <span class="label-tag">PROJECTS</span>
+          </div>
+          <button class="action-tag-btn" id="add-workspace" type="button" title="接入本机文件夹">＋ 接入</button>
+        </div>
+        <div id="workspaces" class="workspaces-tree" aria-label="工作空间与会话列表"></div>
+      </div>
+
+      <div class="sidebar-bottom">
+        <div class="env-info">
+          <span class="status-dot"></span>
+          <span>本机环境已就绪</span>
+        </div>
+        <span class="version-tag">v1.0.0</span>
+      </div>
+    </aside>
+
+    <div class="main-column">
+      <header class="topbar">
+        <button class="icon-button" id="toggle-sidebar" aria-label="切换会话导航" aria-expanded="true" aria-controls="sidebar">☰</button>
+        <div class="breadcrumb">
+          <span class="crumb-root">工作空间</span>
+          <span class="crumb-separator">/</span>
+          <span class="crumb-current" id="breadcrumb">总览</span>
+        </div>
+        <div class="topbar-right">
+          <button class="icon-button model-config-toggle" id="open-model-settings" type="button" aria-label="配置模型与 API Key" title="配置大语言模型与 API Key">
+            <span class="btn-icon" aria-hidden="true">⚡</span>
+            <span class="topbar-btn-text">模型配置</span>
+          </button>
+          <button class="icon-button theme-toggle" id="theme-toggle" type="button" aria-label="切换主题风格" title="切换和纸白 / 仪器暗色">
+            <span class="theme-icon" aria-hidden="true">☀️</span>
+            <span class="theme-text">和纸白</span>
+          </button>
+          <span class="connection" id="connection" role="status">
+            <span class="status-dot"></span>
+            <span>本机已连接</span>
+          </span>
+          <button class="icon-button details-button" id="toggle-details" aria-label="切换执行详情" aria-controls="inspector" aria-expanded="false" hidden>
+            <span>执行日志</span>
+            <span aria-hidden="true">↗</span>
+          </button>
+        </div>
+      </header>
+
+      <main id="workspace-main">
+        <div class="content">
+          <section class="hero" id="hero" aria-labelledby="home-title">
+            <div class="hero-container">
+              <div class="hero-text">
+                <div class="hero-status-pill">
+                  <span class="status-dot"></span>
+                  <span id="core-status">SYSTEM READY</span>
+                </div>
+                <h1 id="home-title">把想法，交给 <span>Cheese Agent</span></h1>
+                <p class="hero-description">
+                  连接本机项目目录，发起多步骤工程任务。实时观测模型思考、工具调用与代码构建过程。
+                </p>
+              </div>
+              <div class="hero-radar-card" aria-hidden="true">
+                <canvas id="orb" width="140" height="140"></canvas>
+                <div class="radar-footer">
+                  <span class="radar-dot"></span>
+                  <span>ENGINE CORE</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="conversation" hidden aria-label="当前对话">
+            <div class="conversation-heading">
+              <div class="conversation-meta-row">
+                <h1 id="session-title">会话</h1>
+              </div>
+              <div id="session-meta"></div>
+            </div>
+            <div id="messages" class="messages-container"></div>
+            <article class="message assistant live-message" id="live" hidden>
+              <div class="message-author">
+                <span class="assistant-avatar">🧀</span>
+                <span class="author-name">CHEESE</span>
+                <span id="live-model-badge" class="message-model-badge"></span>
+                <span id="live-status" class="typing-status">正在准备…</span>
+              </div>
+              <div id="live-reasoning" class="live-reasoning-container" hidden>
+                <div class="live-reasoning-header">
+                  <span class="live-reasoning-icon">💭</span>
+                  <span id="live-reasoning-title" class="live-reasoning-title">思考与推理过程</span>
+                  <span class="live-reasoning-pulse"></span>
+                </div>
+                <div id="live-reasoning-text" class="live-reasoning-content markdown-body"></div>
+              </div>
+              <div id="live-tool-status" class="live-tool-status" hidden></div>
+              <div id="live-text" class="message-content markdown-body" aria-live="polite"></div>
+            </article>
+          </section>
+
+          <div id="notice" class="notice" hidden></div>
+
+          <section class="composer-area" aria-label="发起任务">
+            <form id="composer" class="composer-form">
+              <label class="sr-only" for="prompt">描述你的任务</label>
+              <textarea id="prompt" rows="3" placeholder="描述你想要实现的目标、重构的代码或排查的问题…" required></textarea>
+              <div id="slash-autocomplete" class="slash-autocomplete" hidden aria-label="技能自动补全菜单"></div>
+              <div class="composer-toolbar">
+                <div class="toolbar-badges">
+                  <div class="model-picker-wrapper">
+                    <button id="model-label" class="badge-capsule model-capsule" type="button" aria-haspopup="true" aria-expanded="false" title="点击切换当前任务模型">
+                      <span class="mini-core"></span>
+                      <span id="current-model-name">Agent</span>
+                      <span class="capsule-arrow">▾</span>
+                    </button>
+                    <div id="model-popover" class="model-popover" hidden>
+                      <div class="popover-header">
+                        <div class="popover-title-row">
+                          <span class="popover-title">切换任务模型</span>
+                          <span id="popover-config-badge" class="popover-config-badge" title="当前 API 配置"></span>
+                        </div>
+                        <div id="popover-config-row" class="popover-config-row">
+                          <label for="popover-config-select" class="popover-sub-label">API 配置:</label>
+                          <select id="popover-config-select" class="popover-config-select"></select>
+                        </div>
+                      </div>
+                      <div id="model-popover-list" class="model-popover-list"></div>
+                      <div class="popover-footer">
+                        <button id="popover-open-settings" type="button" class="popover-settings-btn">⚙️ 管理模型配置…</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="skill-picker-wrapper">
+                    <button id="skill-label" class="badge-capsule skill-capsule" type="button" aria-haspopup="true" aria-expanded="false" title="配置当前会话启用的技能 (Skills)">
+                      <span class="skill-icon">✨</span>
+                      <span id="current-skill-text">技能 (0)</span>
+                      <span class="capsule-arrow">▾</span>
+                    </button>
+                    <div id="skill-popover" class="skill-popover" hidden>
+                      <div class="popover-header">
+                        <div class="popover-title-row">
+                          <span class="popover-title">配置会话技能</span>
+                          <span id="skill-count-badge" class="popover-config-badge">0 已启用</span>
+                        </div>
+                        <p class="popover-desc">启用的技能 SOP 将直接注入系统提示词</p>
+                      </div>
+                      <div id="skill-popover-list" class="skill-popover-list"></div>
+                    </div>
+                  </div>
+                  <span id="directory-label" class="badge-capsule directory-capsule" title="任务工作目录"></span>
+                </div>
+                <div class="toolbar-actions">
+                  <button id="stop" type="button" class="stop-button" hidden>停止任务</button>
+                  <button id="send" class="send-button" type="submit">
+                    <span id="send-label">开始任务</span>
+                    <span aria-hidden="true">↵</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+            <div class="composer-hint">
+              <span class="shortcut-tip"><kbd>⌘/Ctrl + Enter</kbd> 发送 · <kbd>Enter</kbd> 换行</span>
+              <span id="run-status" class="run-status-text">准备好开始了</span>
+            </div>
+            <p id="error" class="error" role="alert" hidden></p>
+          </section>
+
+          <section class="home-bottom" id="home-bottom">
+            <div class="quick-prompts-heading">常用任务推荐</div>
+            <div class="quick-prompts">
+              <button data-prompt="帮我梳理当前工作区的项目架构、关键模块与依赖关系" class="prompt-card" type="button">
+                <div class="card-header">
+                  <span class="card-icon">🧭</span>
+                  <span class="card-arrow">↗</span>
+                </div>
+                <strong class="card-title">架构理解</strong>
+                <span class="card-desc">梳理模块组织、入口调用与核心数据流</span>
+              </button>
+              <button data-prompt="检查当前工作区未提交的代码改动并进行审查" class="prompt-card" type="button">
+                <div class="card-header">
+                  <span class="card-icon">🔍</span>
+                  <span class="card-arrow">↗</span>
+                </div>
+                <strong class="card-title">代码审查</strong>
+                <span class="card-desc">对比 Git 改动，排查逻辑漏洞与设计缺陷</span>
+              </button>
+              <button data-prompt="为当前项目编写完整的自动化测试并验证通过" class="prompt-card" type="button">
+                <div class="card-header">
+                  <span class="card-icon">🧪</span>
+                  <span class="card-arrow">↗</span>
+                </div>
+                <strong class="card-title">测试补充</strong>
+                <span class="card-desc">生成关键函数单测并实际执行验证</span>
+              </button>
+              <button data-prompt="帮我制定一份可落地的重构计划并分步执行" class="prompt-card" type="button">
+                <div class="card-header">
+                  <span class="card-icon">⚡</span>
+                  <span class="card-arrow">↗</span>
+                </div>
+                <strong class="card-title">重构推进</strong>
+                <span class="card-desc">消除坏味道，提升模块化与工程可维护性</span>
+              </button>
+            </div>
+
+            <div class="system-overview">
+              <div class="overview-intro">
+                <span class="overview-title">调度与并发状态</span>
+                <p class="overview-desc">主任务独立调度，子 Agent 并行推进，文件共享操作。</p>
+              </div>
+              <div class="metrics-grid">
+                <div class="metric">
+                  <strong id="main-count">0<span>/ 3</span></strong>
+                  <span class="metric-label">主任务运行中</span>
+                </div>
+                <div class="metric">
+                  <strong id="child-count">0<span>/ 3</span></strong>
+                  <span class="metric-label">子 Agent 运行中</span>
+                </div>
+                <div class="metric">
+                  <strong id="queued-count">0</strong>
+                  <span class="metric-label">任务排队中</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <footer class="workbench-footer">
+            <span class="footer-brand">CHEESE AGENT WORKBENCH</span>
+            <span class="footer-tip">保持专注，让构建顺畅发生。</span>
+          </footer>
+        </div>
+
+        <aside id="inspector" class="inspector" hidden aria-label="执行详情">
+          <div class="inspector-heading">
+            <div class="inspector-title">
+              <span>执行详情</span>
+              <span class="inspector-badge">EXECUTION TIMELINE</span>
+            </div>
+            <button class="icon-button" id="close-details" aria-label="关闭执行详情" type="button">✕</button>
+          </div>
+          <p class="inspector-hint">记录工具调用、子任务派生与运行时日志。</p>
+          <div id="events" class="events-list"></div>
+        </aside>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="directory-dialog" aria-labelledby="directory-title">
+    <div class="dialog-heading">
+      <span class="dialog-badge">工作区管理</span>
+      <button class="icon-button" type="button" id="close-directory" aria-label="关闭目录弹窗">✕</button>
+    </div>
+    <h2 id="directory-title">接入本机工作目录</h2>
+    <p class="dialog-desc">选择你电脑上的代码仓库或文件夹。Agent 会在该目录中读取文件、运行终端命令并持续迭代。</p>
+    <button class="send-button directory-picker" type="button" id="pick-directory">
+      <span>📂 打开本地文件夹选择器</span>
+      <span aria-hidden="true">↗</span>
+    </button>
+    <p id="directory-status" role="status" aria-live="polite"></p>
+    <details id="directory-manual">
+      <summary>或者手动输入绝对路径</summary>
+      <form id="directory-form">
+        <label for="directory-path">文件夹绝对路径</label>
+        <input id="directory-path" placeholder="/Users/username/projects/my-app" required autocomplete="off">
+        <button class="send-button" id="connect-directory" type="submit">接入目录 ↗</button>
+      </form>
+    </details>
+    <p id="directory-error" class="error" role="alert"></p>
+  </dialog>
+
+  <dialog id="model-dialog" class="model-dialog" aria-labelledby="model-dialog-title">
+    <div class="dialog-heading">
+      <div class="dialog-title-group">
+        <span class="dialog-badge">模型服务</span>
+        <h2 id="model-dialog-title">大语言模型与 API Key 配置</h2>
+      </div>
+      <button class="icon-button" type="button" id="close-model-dialog" aria-label="关闭模型配置弹窗">✕</button>
+    </div>
+    <p class="dialog-desc">配置各厂商 API Key 与兼容代理端点。数据加密保存在本机安全文件 (~/.cheese/models.json)，运行时自动打码脱敏。</p>
+
+    <div class="model-manager-layout">
+      <!-- Left side: configured models list -->
+      <div class="model-list-pane">
+        <div class="pane-header">
+          <span class="pane-title">已配置模型</span>
+          <button class="action-tag-btn" id="add-model-btn" type="button">＋ 添加</button>
+        </div>
+        <div id="configured-models-list" class="configured-models-list"></div>
+      </div>
+
+      <!-- Right side: edit / add model form -->
+      <form id="model-form" class="model-form-pane">
+        <input type="hidden" id="edit-model-id">
+        <div class="form-row-grid">
+          <div class="form-row">
+            <label for="model-provider-select">供应商预设 (Provider)</label>
+            <select id="model-provider-select" class="form-select">
+              <option value="deepseek">DeepSeek (深度求索)</option>
+              <option value="openai">OpenAI (官方)</option>
+              <option value="google">Google Gemini</option>
+              <option value="anthropic">Anthropic (Claude 兼容代理)</option>
+              <option value="dashscope">阿里云百炼 (通义千问 Qwen)</option>
+              <option value="ollama">Ollama (本地运行)</option>
+              <option value="custom">自定义 (OpenAI 兼容中转/私有部署)</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label for="model-label-input">显示名称 (Label)</label>
+            <input id="model-label-input" class="form-input" placeholder="例如: CPA Antigravity 或 DeepSeek" required>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label for="model-baseurl-input">API BaseURL</label>
+          <input id="model-baseurl-input" class="form-input" placeholder="https://api.deepseek.com/v1" required>
+        </div>
+
+        <div class="form-row">
+          <label for="model-apikey-input">API Key (密钥)</label>
+          <div class="input-with-action">
+            <input id="model-apikey-input" class="form-input" type="password" placeholder="sk-..." autocomplete="off">
+            <button class="inline-btn" id="toggle-key-visibility" type="button" title="显示/隐藏密钥">👁</button>
+          </div>
+          <span class="field-hint" id="key-hint">修改现有模型时若不修改密钥请留空</span>
+        </div>
+
+        <div class="form-row">
+          <label for="model-name-select">主调模型 ID (Primary Model)</label>
+          <div class="input-with-action">
+            <select id="model-name-select" class="form-select" required>
+              <option value="">-- 请选择或拉取模型 --</option>
+            </select>
+            <button class="inline-btn" id="fetch-remote-models-btn" type="button" title="从 BaseURL 远程拉取已开通模型">拉取模型</button>
+          </div>
+          <div id="model-custom-input-wrap" class="custom-model-wrap" hidden>
+            <input id="model-name-custom-input" class="form-input" placeholder="输入自定义模型 ID，例如: gpt-4o 或 custom-model">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="multi-models-header">
+            <label class="multi-models-title">已启用模型 (多选，勾选后可在聊天栏切换)</label>
+            <div class="multi-models-actions">
+              <button type="button" class="mini-text-btn" id="select-all-models-btn">全选</button>
+              <button type="button" class="mini-text-btn" id="deselect-all-models-btn">清空</button>
+              <button type="button" class="mini-text-btn" id="add-custom-model-chip-btn">＋ 添加模型</button>
+            </div>
+          </div>
+          <div id="models-checklist-container" class="models-checklist-container">
+            <div class="models-empty-hint">点击上方「拉取模型」或下拉框选择以加载可用模型</div>
+          </div>
+          <span class="field-hint">勾选的模型将展示在对话输入框底部的模型切换菜单中</span>
+        </div>
+
+        <div class="form-row-checkbox">
+          <label class="checkbox-label">
+            <input type="checkbox" id="model-default-checkbox">
+            <span>设为全局默认配置</span>
+          </label>
+        </div>
+
+        <div id="test-status-msg" class="test-status-msg" hidden></div>
+
+        <div class="form-actions">
+          <button class="ghost-btn" id="test-model-btn" type="button">测试连通性</button>
+          <div class="form-actions-right">
+            <button class="danger-btn" id="delete-model-btn" type="button" hidden>删除</button>
+            <button class="send-button" type="submit" id="save-model-btn">保存配置</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -15,7 +15,9 @@
 // 获取命令行传入的第一个位置参数 (如: pnpm start, tsx src/index.ts init)
 const command = process.argv[2];
 
-if (command === 'init') {
+if (command === 'web') {
+  import('./web/server.js').then(m => m.startWeb()).catch(error => { console.error(error); process.exitCode = 1; });
+} else if (command === 'init') {
   // ── 分支 1：初始化向导 ─────────────────────────────────
   // 动态引入配置生成交互模块，执行终端向导流程
   import('./config/init.js').then(m => m.runInit());

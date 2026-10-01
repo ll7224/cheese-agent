@@ -1,0 +1,208 @@
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
+import { streamSSE } from 'hono/streaming';
+import { bodyLimit } from 'hono/body-limit';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { resolve, join } from 'node:path';
+import { execSync } from 'node:child_process';
+import { Runtime, RuntimeError } from '../runtime/service.js';
+import { acquireServiceLock } from '../runtime/service-lock.js';
+import { captureConfig, resolveConfig } from '../runtime/config.js';
+import { ChannelGateway } from '../channels/gateway.js';
+import { FeishuChannel } from '../channels/feishu.js';
+import { selectLocalDirectory } from './directory-picker.js';
+import { PROVIDER_PRESETS, testConnection, fetchRemoteModels } from '../runtime/model-store.js';
+import { SkillLoader } from '../skills/loader.js';
+
+export function createApp(runtime: Runtime, chooseDirectory: () => Promise<string | null> = selectLocalDirectory) {
+  const app = new Hono();
+  let choosingDirectory = false;
+  app.use('/api/*', bodyLimit({ maxSize: 1_048_576, onError: context => context.json({ error: '请求超过 1 MiB 限制' }, 413) }));
+  app.use('/api/*', async (context, next) => {
+    const origin = context.req.header('origin');
+    const url = new URL(context.req.url);
+    const local = (hostname: string) => ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
+    let host: URL;
+    try { host = new URL(`http://${context.req.header('host') || url.host}`); }
+    catch { return context.json({ error: '无效主机名' }, 403); }
+    if (!local(url.hostname) || !local(host.hostname)) return context.json({ error: '仅允许本机访问' }, 403);
+    if (origin && origin !== url.origin) return context.json({ error: '不允许跨站请求' }, 403);
+    if (!['GET', 'HEAD'].includes(context.req.method) && !context.req.header('content-type')?.includes('application/json')) return context.json({ error: '需要 JSON 请求' }, 415);
+    if (!['GET', 'HEAD'].includes(context.req.method) && !context.req.path.endsWith('/stop')) {
+      let body: unknown;
+      try { body = await context.req.json(); }
+      catch { return context.json({ error: '无效 JSON 请求' }, 400); }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return context.json({ error: '请求必须为 JSON 对象' }, 400);
+    }
+    await next();
+  });
+  app.onError((error, context) => context.json({ error: error.message }, error instanceof RuntimeError ? error.status as 400 : 500));
+  app.get('/api/v1/status', context => context.json(runtime.status()));
+  app.get('/api/v1/workspaces', context => context.json(runtime.listWorkspaces()));
+  app.post('/api/v1/workspaces', async context => context.json(runtime.addWorkspace((await context.req.json()).path), 201));
+  app.post('/api/v1/workspaces/pick-directory', async context => {
+    if (choosingDirectory) throw new RuntimeError('文件夹选择器已打开，请先完成当前选择。', 409);
+    choosingDirectory = true;
+    try { return context.json({ path: await chooseDirectory() }); }
+    finally { choosingDirectory = false; }
+  });
+  app.get('/api/v1/models/presets', context => context.json(PROVIDER_PRESETS));
+  app.get('/api/v1/models', context => context.json(runtime.modelStore.list()));
+  app.post('/api/v1/models', async context => {
+    const body = await context.req.json();
+    return context.json(runtime.modelStore.saveModel(body), 201);
+  });
+  app.delete('/api/v1/models/:id', context => {
+    const success = runtime.modelStore.deleteModel(context.req.param('id'));
+    if (!success) throw new RuntimeError('模型配置不存在', 404);
+    return context.json({ success: true });
+  });
+  app.post('/api/v1/models/:id/delete', context => {
+    const success = runtime.modelStore.deleteModel(context.req.param('id'));
+    if (!success) throw new RuntimeError('模型配置不存在', 404);
+    return context.json({ success: true });
+  });
+  app.post('/api/v1/models/:id/set-default', context => {
+    const success = runtime.modelStore.setDefault(context.req.param('id'));
+    if (!success) throw new RuntimeError('模型配置不存在', 404);
+    return context.json({ success: true });
+  });
+  app.post('/api/v1/models/test', async context => {
+    const body = await context.req.json();
+    let { provider, baseURL, apiKey, name, id } = body;
+    if (id) {
+      const stored = runtime.modelStore.get(id);
+      if (stored) {
+        provider = provider || stored.provider;
+        baseURL = baseURL || stored.baseURL;
+        apiKey = (apiKey !== undefined && apiKey !== '') ? apiKey : stored.apiKey;
+        name = name || stored.name;
+      }
+    }
+    return context.json(await testConnection({ provider, baseURL, apiKey, name }));
+  });
+  app.post('/api/v1/models/fetch-remote', async context => {
+    const body = await context.req.json();
+    let { baseURL, apiKey, id } = body;
+    if (id) {
+      const stored = runtime.modelStore.get(id);
+      if (stored) {
+        baseURL = baseURL || stored.baseURL;
+        apiKey = (apiKey !== undefined && apiKey !== '') ? apiKey : stored.apiKey;
+      }
+    }
+    const models = await fetchRemoteModels({ baseURL, apiKey });
+    return context.json({ models });
+  });
+
+  app.get('/api/v1/skills', context => {
+    const workspaceId = context.req.query('workspaceId');
+    let targetDir = process.cwd();
+    if (workspaceId) {
+      targetDir = runtime.workspace(workspaceId).path;
+    }
+    const loader = new SkillLoader(targetDir);
+    return context.json({ skills: loader.load() });
+  });
+
+  app.get('/api/v1/sessions', context => {
+    const offset = Number(context.req.query('offset') || 0);
+    const requestedLimit = Number(context.req.query('limit') || 50);
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(requestedLimit) || requestedLimit < 1) throw new RuntimeError('无效分页参数');
+    const limit = Math.min(100, requestedLimit);
+    return context.json(runtime.state.sessions.filter(session => session.workspaceId === context.req.query('workspaceId')).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(offset, offset + limit).map(({ messages, ...session }) => ({ ...session, run: runtime.state.runs.filter(run => run.sessionId === session.id).at(-1) })));
+  });
+  app.post('/api/v1/sessions', async context => {
+    const body = await context.req.json();
+    return context.json(runtime.createSession(body.workspaceId, body.modelId, body.activeSkills), 201);
+  });
+  app.post('/api/v1/sessions/:id/model', async context => {
+    const body = await context.req.json();
+    if (!body?.modelId || typeof body.modelId !== 'string') throw new RuntimeError('缺少有效的 modelId 参数');
+    return context.json(runtime.updateSessionModel(context.req.param('id'), body.modelId));
+  });
+  app.post('/api/v1/sessions/:id/skills', async context => {
+    const body = await context.req.json();
+    if (!body || !Array.isArray(body.skills)) throw new RuntimeError('缺少有效的 skills 数组参数');
+    return context.json(runtime.updateSessionSkills(context.req.param('id'), body.skills));
+  });
+  app.get('/api/v1/sessions/:id', context => context.json({ ...runtime.session(context.req.param('id')), runs: runtime.state.runs.filter(run => run.sessionId === context.req.param('id')), events: runtime.state.events.filter(event => event.sessionId === context.req.param('id')) }));
+  app.get('/api/v1/runs/:id/events', context => {
+    const id = context.req.param('id');
+    const after = Number(context.req.header('last-event-id') || context.req.query('after') || 0);
+    if (!Number.isSafeInteger(after) || after < 0) throw new RuntimeError('无效事件游标');
+    runtime.events(id, after);
+    return streamSSE(context, async stream => {
+      let pending = Promise.resolve();
+      const send = (event: any) => { pending = pending.then(() => stream.writeSSE({ data: JSON.stringify(event), id: String(event.sequence) })).catch(() => {}); };
+      const unsubscribe = runtime.subscribe(id, send);
+      try {
+        runtime.events(id, after).forEach(send);
+        await new Promise<void>(resolve => { stream.onAbort(resolve); });
+      } finally { unsubscribe(); await pending.catch(() => {}); }
+    });
+  });
+  app.post('/api/v1/sessions/:id/runs', async context => {
+    const body = await context.req.json();
+    return context.json(runtime.submit(context.req.param('id'), body.text, body.key), 202);
+  });
+  app.post('/api/v1/runs/:id/stop', context => context.json(runtime.stop(context.req.param('id'))));
+  app.all('/api/*', context => context.json({ error: '接口不存在' }, 404));
+  app.get('/app.js', context => context.body(readFileSync(new URL('../../web/app.js', import.meta.url), 'utf8'), 200, { 'Content-Type': 'text/javascript' }));
+  app.get('/style.css', context => context.body(readFileSync(new URL('../../web/style.css', import.meta.url), 'utf8'), 200, { 'Content-Type': 'text/css' }));
+  app.get('*', context => context.html(readFileSync(new URL('../../web/index.html', import.meta.url), 'utf8')));
+  return app;
+}
+
+export function autoDetectSystemProxy() {
+  if (process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy) return;
+  if (process.platform === 'darwin') {
+    try {
+      const out = execSync('scutil --proxy', { encoding: 'utf8', timeout: 1000 });
+      const httpsMatch = out.match(/HTTPSEnable\s*:\s*1[^]*?HTTPSPort\s*:\s*(\d+)[^]*?HTTPSProxy\s*:\s*([^\s\n]+)/);
+      const httpMatch = out.match(/HTTPEnable\s*:\s*1[^]*?HTTPPort\s*:\s*(\d+)[^]*?HTTPProxy\s*:\s*([^\s\n]+)/);
+      const target = httpsMatch || httpMatch;
+      if (target) {
+        const proxyUrl = `http://${target[2]}:${target[1]}`;
+        process.env.HTTPS_PROXY = proxyUrl;
+        process.env.HTTP_PROXY = proxyUrl;
+      }
+    } catch {}
+  }
+}
+
+export async function startWeb() {
+  autoDetectSystemProxy();
+  const port = Number(process.env.CHEESE_PORT || 3210);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('无效端口');
+  const dataDir = resolve(process.env.CHEESE_DATA_DIR || join(homedir(), '.cheese-agent'));
+  const release = acquireServiceLock(dataDir);
+  let runtime: Runtime;
+  try {
+    runtime = new Runtime(dataDir, undefined, { configDir: process.cwd(), maxConcurrent: Number(process.env.CHEESE_MAX_RUNS || 3), maxChildren: Number(process.env.CHEESE_MAX_CHILDREN || 3) });
+    runtime.addWorkspace(process.cwd());
+  } catch (error) { release(); throw error; }
+  const workspace = runtime.addWorkspace(process.cwd());
+  const gateway = new ChannelGateway({ run: (name, message) => runtime.runPrompt(workspace.id, message.text, `${name}:${message.channelId}:${message.senderId}`) });
+  const server = serve({ fetch: createApp(runtime).fetch, hostname: '127.0.0.1', port });
+  try {
+    await new Promise<void>((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
+    const snapshot = captureConfig(process.cwd(), process.cwd());
+    if (snapshot.values.channels.feishu.enabled) gateway.register(new FeishuChannel(resolveConfig(snapshot).channels.feishu));
+    await gateway.startAll();
+    runtime.enableSchedules();
+  } catch (error) { await gateway.stopAll(); await runtime.close(); server.close(); release(); throw error; }
+  let closing: Promise<void> | undefined;
+  const close = () => closing ||= (async () => {
+    server.close();
+    try { await gateway.stopAll(); await runtime.close(); }
+    finally { if ('closeAllConnections' in server) server.closeAllConnections(); release(); }
+  })();
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => {
+    void close().then(() => process.exit(0), error => { console.error(error); process.exit(1); });
+  });
+  const address = server.address();
+  console.log(`Cheese Agent → http://127.0.0.1:${typeof address === 'object' && address ? address.port : port}`);
+  return { runtime, server, close };
+}
