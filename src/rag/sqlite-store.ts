@@ -43,8 +43,11 @@ export class SqliteVectorStore {
         chunk_index INTEGER NOT NULL,
         embedding TEXT NOT NULL,
         model TEXT NOT NULL DEFAULT 'text-embedding-v3',
+        collection_id TEXT NOT NULL DEFAULT 'default',
         updated_at INTEGER NOT NULL
       );
+
+      CREATE INDEX IF NOT EXISTS idx_chunks_collection ON chunks(collection_id);
 
       -- 2. 向量索引虚拟表：vec0 引擎，定长 ${DIMS} 维 Float32 向量
       CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(
@@ -57,6 +60,15 @@ export class SqliteVectorStore {
         text, id UNINDEXED, source UNINDEXED
       );
     `);
+
+    // 检查并自动迁移旧库：若缺少 collection_id 列则自动补齐
+    const cols = (this.db.prepare('PRAGMA table_info(chunks)').all() as any[]).map((c) => c.name);
+    if (!cols.includes('collection_id')) {
+      this.db.exec(`
+        ALTER TABLE chunks ADD COLUMN collection_id TEXT NOT NULL DEFAULT 'default';
+        CREATE INDEX IF NOT EXISTS idx_chunks_collection ON chunks(collection_id);
+      `);
+    }
   }
 
   /**
@@ -69,21 +81,24 @@ export class SqliteVectorStore {
    *
    * @param chunk 文本切片对象
    * @param embedding 浮点向量数组（必须为 ${DIMS} 维）
+   * @param collectionId 可选所属集合 ID（默认 'default'）
    */
-  add(chunk: Chunk, embedding: number[]): void {
+  add(chunk: Chunk, embedding: number[], collectionId?: string): void {
     const now = Date.now();
+    const colId = collectionId || chunk.collectionId || 'default';
 
     // 1. 写入/替换普通元数据表
     this.db.prepare(`
       INSERT OR REPLACE INTO chunks
-        (id, text, source, chunk_index, embedding, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+        (id, text, source, chunk_index, embedding, collection_id, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
       chunk.id,
       chunk.text,
       chunk.source,
       chunk.index,
       JSON.stringify(embedding),
+      colId,
       now
     );
 
@@ -114,11 +129,15 @@ export class SqliteVectorStore {
    * 采用 SQLite 显式事务（Transaction）包裹，批量写入性能相比单条提交可提升数十倍。
    *
    * @param items 包含切片与向量的数据列表
+   * @param defaultCollectionId 默认所属集合 ID
    */
-  addBatch(items: Array<{ chunk: Chunk; embedding: number[] }>): void {
+  addBatch(
+    items: Array<{ chunk: Chunk; embedding: number[]; collectionId?: string }>,
+    defaultCollectionId?: string
+  ): void {
     const tx = this.db.transaction(() => {
-      for (const { chunk, embedding } of items) {
-        this.add(chunk, embedding);
+      for (const { chunk, embedding, collectionId } of items) {
+        this.add(chunk, embedding, collectionId || defaultCollectionId);
       }
     });
     tx(); // 执行事务提交
@@ -129,19 +148,47 @@ export class SqliteVectorStore {
    *
    * @param queryEmbedding 查询语句生成的特征向量
    * @param topK 需要召回的最相近候选数量
+   * @param collectionIds 可选指定的知识库集合过滤列表
    * @returns 检索命中的切片及相似度得分（范围 [0, 1]，值越接近 1 越相关）
    */
-  vectorSearch(queryEmbedding: number[], topK: number): Array<{ chunk: StoredChunk; score: number }> {
+  vectorSearch(
+    queryEmbedding: number[],
+    topK: number,
+    collectionIds?: string[]
+  ): Array<{ chunk: StoredChunk; score: number }> {
+    if (collectionIds && collectionIds.length === 0) return [];
+
     const buf = Buffer.from(new Float32Array(queryEmbedding).buffer);
-    // 通过 MATCH 语法调用 sqlite-vec 内部向量距离排序
-    const rows = this.db.prepare(`
-      SELECT v.id, v.distance, c.text, c.source, c.chunk_index, c.embedding
-      FROM chunks_vec v
-      JOIN chunks c ON c.id = v.id
-      WHERE v.embedding MATCH ?
-      ORDER BY v.distance
-      LIMIT ?
-    `).all(buf, topK) as any[];
+    const k = Math.max(topK * 4, 50);
+
+    let rows: any[];
+    if (collectionIds && collectionIds.length > 0) {
+      const placeholders = collectionIds.map(() => '?').join(',');
+      rows = this.db.prepare(`
+        SELECT v.id, v.distance, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
+        FROM (
+          SELECT id, distance
+          FROM chunks_vec
+          WHERE embedding MATCH ? AND k = ?
+        ) v
+        JOIN chunks c ON c.id = v.id
+        WHERE c.collection_id IN (${placeholders})
+        ORDER BY v.distance
+        LIMIT ?
+      `).all(buf, k, ...collectionIds, topK) as any[];
+    } else {
+      rows = this.db.prepare(`
+        SELECT v.id, v.distance, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
+        FROM (
+          SELECT id, distance
+          FROM chunks_vec
+          WHERE embedding MATCH ? AND k = ?
+        ) v
+        JOIN chunks c ON c.id = v.id
+        ORDER BY v.distance
+        LIMIT ?
+      `).all(buf, k, topK) as any[];
+    }
 
     return rows.map((r) => ({
       chunk: {
@@ -151,6 +198,7 @@ export class SqliteVectorStore {
         index: r.chunk_index,
         tokenEstimate: Math.ceil(r.text.length / 4),
         embedding: JSON.parse(r.embedding),
+        collectionId: r.collection_id,
         addedAt: 0,
       },
       // 将余弦距离（Cosine Distance ∈ [0, 2]）转换为余弦相似度（Cosine Similarity ∈ [-1, 1]）
@@ -163,18 +211,37 @@ export class SqliteVectorStore {
    *
    * @param query 用户输入的搜索词
    * @param topK 需要召回的候选数量
+   * @param collectionIds 可选指定的知识库集合过滤列表
    * @returns 命中的切片及归一化相关度得分
    */
-  keywordSearch(query: string, topK: number): Array<{ chunk: StoredChunk; score: number }> {
-    // 调用 FTS5 内置的 bm25() 算法对全文匹配项进行打分排序
-    const rows = this.db.prepare(`
-      SELECT f.id, bm25(chunks_fts) AS rank, c.text, c.source, c.chunk_index, c.embedding
-      FROM chunks_fts f
-      JOIN chunks c ON c.id = f.id
-      WHERE chunks_fts MATCH ?
-      ORDER BY rank
-      LIMIT ?
-    `).all(query, topK) as any[];
+  keywordSearch(
+    query: string,
+    topK: number,
+    collectionIds?: string[]
+  ): Array<{ chunk: StoredChunk; score: number }> {
+    if (collectionIds && collectionIds.length === 0) return [];
+
+    let rows: any[];
+    if (collectionIds && collectionIds.length > 0) {
+      const placeholders = collectionIds.map(() => '?').join(',');
+      rows = this.db.prepare(`
+        SELECT f.id, bm25(chunks_fts) AS rank, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
+        FROM chunks_fts f
+        JOIN chunks c ON c.id = f.id
+        WHERE chunks_fts MATCH ? AND c.collection_id IN (${placeholders})
+        ORDER BY rank
+        LIMIT ?
+      `).all(query, ...collectionIds, topK) as any[];
+    } else {
+      rows = this.db.prepare(`
+        SELECT f.id, bm25(chunks_fts) AS rank, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
+        FROM chunks_fts f
+        JOIN chunks c ON c.id = f.id
+        WHERE chunks_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `).all(query, topK) as any[];
+    }
 
     return rows.map((r) => ({
       chunk: {
@@ -184,6 +251,7 @@ export class SqliteVectorStore {
         index: r.chunk_index,
         tokenEstimate: Math.ceil(r.text.length / 4),
         embedding: JSON.parse(r.embedding),
+        collectionId: r.collection_id,
         addedAt: 0,
       },
       // FTS5 的 bm25() 返回值通常为负数（越小代表越相关），将其转换为 [0, 1] 正向得分
@@ -192,24 +260,71 @@ export class SqliteVectorStore {
   }
 
   /**
-   * 获取当前知识库中的切片总数量。
+   * 获取当前知识库中的切片总数量（可指定集合过滤）。
+   *
+   * @param collectionIds 可选指定集合 ID 或集合 ID 列表
    */
-  size(): number {
-    return (this.db.prepare('SELECT COUNT(*) as n FROM chunks').get() as any).n;
+  size(collectionIds?: string[] | string): number {
+    if (!collectionIds) {
+      return (this.db.prepare('SELECT COUNT(*) as n FROM chunks').get() as any).n;
+    }
+    const cols = Array.isArray(collectionIds) ? collectionIds : [collectionIds];
+    if (cols.length === 0) return 0;
+    const placeholders = cols.map(() => '?').join(',');
+    return (
+      this.db
+        .prepare(`SELECT COUNT(*) as n FROM chunks WHERE collection_id IN (${placeholders})`)
+        .get(...cols) as any
+    ).n;
   }
 
   /**
-   * 清空三张表中的全部数据。
+   * 清空整个向量库或指定集合。
+   *
+   * @param collectionId 可选清空指定的集合 ID
    */
-  clear(): void {
-    this.db.exec('DELETE FROM chunks; DELETE FROM chunks_vec; DELETE FROM chunks_fts;');
+  clear(collectionId?: string): void {
+    if (!collectionId) {
+      this.db.exec('DELETE FROM chunks; DELETE FROM chunks_vec; DELETE FROM chunks_fts;');
+    } else {
+      this.db
+        .prepare(`DELETE FROM chunks_vec WHERE id IN (SELECT id FROM chunks WHERE collection_id = ?)`)
+        .run(collectionId);
+      this.db
+        .prepare(`DELETE FROM chunks_fts WHERE id IN (SELECT id FROM chunks WHERE collection_id = ?)`)
+        .run(collectionId);
+      this.db.prepare(`DELETE FROM chunks WHERE collection_id = ?`).run(collectionId);
+    }
   }
 
   /**
-   * 查询所有已入库的去重来源列表（如文件路径、URL 等）。
+   * 查询已入库的去重来源列表（如文件路径、URL 等）。
+   *
+   * @param collectionIds 可选指定集合 ID 过滤
    */
-  sources(): string[] {
-    return (this.db.prepare('SELECT DISTINCT source FROM chunks').all() as any[]).map((r) => r.source);
+  sources(collectionIds?: string[] | string): string[] {
+    if (!collectionIds) {
+      return (this.db.prepare('SELECT DISTINCT source FROM chunks').all() as any[]).map((r) => r.source);
+    }
+    const cols = Array.isArray(collectionIds) ? collectionIds : [collectionIds];
+    if (cols.length === 0) return [];
+    const placeholders = cols.map(() => '?').join(',');
+    return (
+      this.db
+        .prepare(`SELECT DISTINCT source FROM chunks WHERE collection_id IN (${placeholders})`)
+        .all(...cols) as any[]
+    ).map((r) => r.source);
+  }
+
+  /**
+   * 获取所有存在的集合列表及其切片计数。
+   */
+  getCollections(): Array<{ id: string; count: number }> {
+    return this.db
+      .prepare(
+        `SELECT collection_id as id, COUNT(*) as count FROM chunks GROUP BY collection_id ORDER BY count DESC`
+      )
+      .all() as any[];
   }
 
   /**
@@ -225,24 +340,28 @@ export class SqliteVectorStore {
    * @param embedFn 向量化模型函数
    * @param query 搜索关键词/语句
    * @param topK 最终需要返回的结果数量（默认 5）
+   * @param collectionIds 可选指定的集合范围过滤列表
    */
   async hybridSearch(
     embedFn: EmbeddingFn,
     query: string,
     topK: number = 5,
+    collectionIds?: string[]
   ): Promise<SearchResult[]> {
-    // 候选池按 topK * 4 放大，若总条数不足则取当前库总数
-    const candidateCount = Math.min(topK * 4, this.size());
+    if (collectionIds && collectionIds.length === 0) return [];
+
+    const total = this.size(collectionIds);
+    const candidateCount = Math.min(topK * 4, total);
     if (candidateCount === 0) return [];
 
     // 计算 Query 向量
     const [queryVec] = await embed(embedFn, [query]);
 
     // 路径 1: sqlite-vec 密集向量检索
-    const vectorResults = this.vectorSearch(queryVec, candidateCount);
+    const vectorResults = this.vectorSearch(queryVec, candidateCount, collectionIds);
 
     // 路径 2: FTS5 稀疏关键词检索
-    const keywordResults = this.keywordSearch(query, candidateCount);
+    const keywordResults = this.keywordSearch(query, candidateCount, collectionIds);
 
     // 双路分数 Min-Max 归一化
     const vecScores = normalizeMinMax(vectorResults.map((r) => r.score));

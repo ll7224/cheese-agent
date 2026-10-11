@@ -12,6 +12,8 @@ export interface Chunk {
   index: number;
   /** 预估占用的 Token 数量，用于做上下文预算控制 */
   tokenEstimate: number;
+  /** 所属知识库集合 ID（命名空间，默认 'default'） */
+  collectionId?: string;
 }
 
 // ---------------------- 核心超参数配置 ----------------------
