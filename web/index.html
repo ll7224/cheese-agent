@@ -112,6 +112,11 @@
             <div class="conversation-heading">
               <div class="conversation-meta-row">
                 <h1 id="session-title">会话</h1>
+                <button id="session-agent-badge" class="session-agent-badge" type="button" title="点击查看当前智能体画像与工具沙箱">
+                  <span id="session-agent-avatar" class="badge-avatar">🧀</span>
+                  <span id="session-agent-name" class="badge-name">通用助手</span>
+                  <span class="badge-info-tag">设定 ℹ️</span>
+                </button>
               </div>
               <div id="session-meta"></div>
             </div>
@@ -145,6 +150,23 @@
               <div id="slash-autocomplete" class="slash-autocomplete" hidden aria-label="技能自动补全菜单"></div>
               <div class="composer-toolbar">
                 <div class="toolbar-badges">
+                  <div class="agent-picker-wrapper">
+                    <button id="agent-label" class="badge-capsule agent-capsule" type="button" aria-haspopup="true" aria-expanded="false" title="切换当前任务/会话的智能体 (Agent)">
+                      <span id="current-agent-avatar" class="agent-avatar-icon">🧀</span>
+                      <span id="current-agent-name">通用助手</span>
+                      <span class="capsule-arrow">▾</span>
+                    </button>
+                    <div id="agent-popover" class="agent-popover" hidden>
+                      <div class="popover-header">
+                        <div class="popover-title-row">
+                          <span class="popover-title">切换智能体 (Agent)</span>
+                          <button id="reload-agents-btn" type="button" class="action-tag-btn" title="热重载工作区和全局 Agent">↻ 重载</button>
+                        </div>
+                        <p class="popover-desc">切换不同专业领域设定、工具白名单沙箱与专属知识库</p>
+                      </div>
+                      <div id="agent-popover-list" class="agent-popover-list"></div>
+                    </div>
+                  </div>
                   <div class="model-picker-wrapper">
                     <button id="model-label" class="badge-capsule model-capsule" type="button" aria-haspopup="true" aria-expanded="false" title="点击切换当前任务模型">
                       <span class="mini-core"></span>
@@ -204,6 +226,14 @@
           </section>
 
           <section class="home-bottom" id="home-bottom">
+            <div class="agent-selection-section" id="agent-selection-section">
+              <div class="quick-prompts-heading agent-section-heading">
+                <span>专业领域智能体 (Domain Agents)</span>
+                <span class="section-sub-tip">点击选定专业领域 Agent，自动加载专属设定、工具沙箱与知识库</span>
+              </div>
+              <div id="agent-cards-grid" class="agent-cards-grid"></div>
+            </div>
+
             <div class="quick-prompts-heading">常用任务推荐</div>
             <div class="quick-prompts">
               <button data-prompt="帮我梳理当前工作区的项目架构、关键模块与依赖关系" class="prompt-card" type="button">
@@ -408,6 +438,17 @@
         </div>
       </form>
     </div>
+  </dialog>
+
+  <dialog id="agent-dialog" class="agent-dialog" aria-labelledby="agent-dialog-title">
+    <div class="dialog-heading">
+      <div class="dialog-title-group">
+        <span class="dialog-badge">智能体设定</span>
+        <h2 id="agent-dialog-title">智能体画像与权限沙箱</h2>
+      </div>
+      <button class="icon-button" type="button" id="close-agent-dialog" aria-label="关闭智能体弹窗">✕</button>
+    </div>
+    <div class="agent-dialog-body" id="agent-dialog-content"></div>
   </dialog>
 
   <script type="module" src="/app.js"></script>

@@ -26,6 +26,8 @@ let enabledModelsForForm = new Set();
 let availableSkills = [];
 let currentSessionSkills = [];
 let slashSelectedIndex = 0;
+let availableAgents = [];
+let selectedAgentId = localStorage.getItem('cheese.selectedAgent') || 'general';
 
 const node = (tag, className, text) => {
   const result = document.createElement(tag);
@@ -231,6 +233,7 @@ function changeRoute() {
   }
   closeModelPopover();
   closeSkillPopover();
+  closeAgentPopover();
   if (element('slash-autocomplete')) element('slash-autocomplete').hidden = true;
   messagesSignature = '';
   eventSource?.close(); eventSource = undefined; streamingRun = undefined; events.clear(); element('events').replaceChildren();
@@ -283,7 +286,14 @@ function renderControls() {
   element('directory-label').title = workspace?.path || '';
   updateModelCapsuleDisplay();
   renderSkillCapsule();
+  renderAgentCapsule();
   element('run-status').textContent = currentRun ? labels[currentRun.status] || currentRun.status : '准备好开始了';
+
+  const currentAgent = availableAgents.find(a => a.id === (currentSession?.agentId || selectedAgentId)) || { avatar: '🧀', name: 'CHEESE' };
+  const liveAvatar = element('live')?.querySelector('.assistant-avatar');
+  if (liveAvatar) liveAvatar.textContent = currentAgent.avatar || '🧀';
+  const liveAuthorName = element('live')?.querySelector('.author-name');
+  if (liveAuthorName) liveAuthorName.textContent = (currentAgent.name || 'CHEESE').toUpperCase();
 
   const liveBadge = element('live-model-badge');
   if (liveBadge) {
@@ -309,10 +319,11 @@ function renderMessages(session) {
     if (message.role === 'user') {
       author.textContent = 'YOU / 用户';
     } else {
+      const sessionAgent = availableAgents.find(a => a.id === session.agentId) || { avatar: '🧀', name: 'CHEESE' };
       const modelTag = message.model || sessionDefaultModel;
       author.append(
-        node('span', 'assistant-avatar', '🧀'),
-        document.createTextNode(' CHEESE')
+        node('span', 'assistant-avatar', sessionAgent.avatar || '🧀'),
+        document.createTextNode(` ${sessionAgent.name || 'CHEESE'}`)
       );
       if (modelTag) {
         author.append(node('span', 'message-model-badge', modelTag));
@@ -507,6 +518,7 @@ async function refresh() {
     if (workspaceId) expandedWorkspaces.add(workspaceId);
     localStorage.setItem('cheese.workspace', workspaceId);
     if (workspaceId && availableSkills.length === 0) loadSkills(workspaceId);
+    if (workspaceId && availableAgents.length === 0) loadAgents(workspaceId);
 
     currentSession = session;
     currentRun = session?.runs.at(-1);
@@ -608,8 +620,11 @@ async function refresh() {
             sessionBtn.title = item.title;
 
             const dot = node('span', 'session-dot');
+            const agentInfo = availableAgents.find(a => a.id === item.agentId) || { avatar: '🧀', name: '通用助手' };
+            const avatar = node('span', 'session-agent-icon', agentInfo.avatar || '🤖');
+            avatar.title = `${agentInfo.name} (${item.agentId || 'general'})`;
             const title = node('span', 'session-title', item.title);
-            sessionBtn.append(dot, title);
+            sessionBtn.append(dot, avatar, title);
 
             if (isRunning) {
               sessionBtn.append(node('span', 'session-state', labels[item.run.status]));
@@ -665,6 +680,7 @@ element('composer').addEventListener('submit', async event => {
       if (currentSessionSkills && currentSessionSkills.length > 0) {
         sessionPayload.activeSkills = currentSessionSkills;
       }
+      sessionPayload.agentId = selectedAgentId || 'general';
       const session = await api('/sessions', sessionPayload);
       sessionId = session.id;
       history.replaceState(null, '', `#${sessionId}`);
@@ -1282,12 +1298,293 @@ function selectSlashSkill(skillName) {
   promptEl.focus();
 }
 
+/* --- Domain Agent Management & Popover --- */
+async function loadAgents(targetWorkspaceId = workspaceId) {
+  try {
+    const query = targetWorkspaceId ? `?workspaceId=${encodeURIComponent(targetWorkspaceId)}` : '';
+    const res = await api(`/agents${query}`);
+    availableAgents = res.agents || [];
+    renderAgentCapsule();
+    renderAgentCards();
+  } catch (err) {
+    console.warn('加载智能体列表失败:', err);
+  }
+}
+
+function renderAgentCapsule() {
+  const currentId = currentSession?.agentId || selectedAgentId || 'general';
+  const agent = availableAgents.find(a => a.id === currentId) || { id: 'general', name: '通用助手', avatar: '🧀', tools: ['*'] };
+
+  const avatarEl = element('current-agent-avatar');
+  const nameEl = element('current-agent-name');
+  const labelBtn = element('agent-label');
+  if (avatarEl) avatarEl.textContent = agent.avatar || '🤖';
+  if (nameEl) nameEl.textContent = agent.name || '通用助手';
+  if (labelBtn) {
+    labelBtn.title = `${agent.name} (${agent.id}) · 点击切换智能体`;
+  }
+
+  const sessionBadge = element('session-agent-badge');
+  const sessionAvatar = element('session-agent-avatar');
+  const sessionName = element('session-agent-name');
+  if (sessionBadge && sessionAvatar && sessionName) {
+    sessionAvatar.textContent = agent.avatar || '🤖';
+    sessionName.textContent = agent.name || '通用助手';
+    sessionBadge.hidden = !currentSession;
+  }
+}
+
+function renderAgentCards() {
+  const grid = element('agent-cards-grid');
+  if (!grid) return;
+  grid.replaceChildren();
+
+  if (availableAgents.length === 0) {
+    grid.append(node('div', 'empty-ws-sessions', '暂无可用智能体'));
+    return;
+  }
+
+  const currentId = currentSession?.agentId || selectedAgentId || 'general';
+
+  for (const agent of availableAgents) {
+    const isSelected = agent.id === currentId;
+    const card = node('button', `agent-card ${isSelected ? 'selected' : ''}`);
+    card.type = 'button';
+
+    const header = node('div', 'agent-card-header');
+    const avatar = node('span', 'agent-card-avatar', agent.avatar || '🤖');
+    const srcTag = node('span', `agent-source-badge ${agent.source || 'builtin'}`,
+      agent.source === 'builtin' ? '内置' : agent.source === 'workspace' ? '工作区' : '全局'
+    );
+    header.append(avatar, srcTag);
+
+    const name = node('strong', 'agent-card-name', agent.name);
+    const desc = node('span', 'agent-card-desc', agent.description || '无详细描述');
+
+    const tags = node('div', 'agent-card-tags');
+    const toolsCount = agent.tools?.includes('*') ? '全权限工具' : `${agent.tools?.length || 0} 个白名单工具`;
+    tags.append(node('span', 'agent-mini-tag', toolsCount));
+
+    if (agent.skills && agent.skills.length > 0) {
+      tags.append(node('span', 'agent-mini-tag', `${agent.skills.length} 个技能 SOP`));
+    }
+    if (agent.knowledge && agent.knowledge.length > 0) {
+      tags.append(node('span', 'agent-mini-tag', `${agent.knowledge.length} 个知识库`));
+    }
+
+    card.append(header, name, desc, tags);
+
+    card.onclick = async () => {
+      if (currentSession?.id) {
+        if (active(currentRun?.status)) {
+          report(new Error('当前会话任务正在运行中，无法切换 Agent'));
+          return;
+        }
+        try {
+          const updated = await api(`/sessions/${currentSession.id}/agent`, { agentId: agent.id });
+          currentSession = updated;
+          if (agent.skills && agent.skills.length > 0) {
+            currentSessionSkills = currentSession.activeSkills || [];
+            renderSkillCapsule();
+          }
+          await refresh();
+        } catch (err) {
+          report(err);
+        }
+      } else {
+        selectedAgentId = agent.id;
+        localStorage.setItem('cheese.selectedAgent', selectedAgentId);
+        if (agent.skills && agent.skills.length > 0) {
+          currentSessionSkills = [...agent.skills];
+          renderSkillCapsule();
+        }
+        renderAgentCapsule();
+        renderAgentCards();
+      }
+    };
+
+    grid.append(card);
+  }
+}
+
+function renderAgentPicker() {
+  const listEl = element('agent-popover-list');
+  if (!listEl) return;
+  listEl.replaceChildren();
+
+  if (availableAgents.length === 0) {
+    listEl.append(node('div', 'empty-ws-sessions', '暂无可用智能体'));
+    return;
+  }
+
+  const currentId = currentSession?.agentId || selectedAgentId || 'general';
+
+  for (const agent of availableAgents) {
+    const isSelected = agent.id === currentId;
+    const item = node('button', `agent-popover-item ${isSelected ? 'active' : ''}`);
+    item.type = 'button';
+
+    const avatar = node('span', 'agent-popover-avatar', agent.avatar || '🤖');
+    const info = node('div', 'agent-popover-info');
+
+    const nameRow = node('div', 'agent-popover-name-row');
+    const name = node('span', 'agent-popover-name', agent.name);
+    const srcTag = node('span', `agent-source-badge ${agent.source || 'builtin'}`,
+      agent.source === 'builtin' ? '内置' : agent.source === 'workspace' ? '工作区' : '全局'
+    );
+    nameRow.append(name, srcTag);
+
+    const desc = node('span', 'agent-popover-desc', agent.description || '无详细描述');
+    info.append(nameRow, desc);
+
+    item.append(avatar, info);
+
+    item.onclick = async () => {
+      closeAgentPopover();
+      if (currentSession?.id) {
+        if (active(currentRun?.status)) {
+          report(new Error('当前会话任务正在运行中，无法切换 Agent'));
+          return;
+        }
+        try {
+          const updated = await api(`/sessions/${currentSession.id}/agent`, { agentId: agent.id });
+          currentSession = updated;
+          if (agent.skills && agent.skills.length > 0) {
+            currentSessionSkills = currentSession.activeSkills || [];
+            renderSkillCapsule();
+          }
+          await refresh();
+        } catch (err) {
+          report(err);
+        }
+      } else {
+        selectedAgentId = agent.id;
+        localStorage.setItem('cheese.selectedAgent', selectedAgentId);
+        if (agent.skills && agent.skills.length > 0) {
+          currentSessionSkills = [...agent.skills];
+          renderSkillCapsule();
+        }
+        renderAgentCapsule();
+        renderAgentCards();
+      }
+    };
+
+    listEl.append(item);
+  }
+}
+
+function toggleAgentPopover() {
+  const popover = element('agent-popover');
+  const btn = element('agent-label');
+  if (!popover || !btn) return;
+  const willOpen = popover.hidden;
+  popover.hidden = !willOpen;
+  btn.setAttribute('aria-expanded', String(willOpen));
+  if (willOpen) {
+    closeModelPopover();
+    closeSkillPopover();
+    renderAgentPicker();
+  }
+}
+
+function closeAgentPopover() {
+  const popover = element('agent-popover');
+  const btn = element('agent-label');
+  if (popover) popover.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function showAgentDetailsDialog(agentId) {
+  const agent = availableAgents.find(a => a.id === agentId) || {
+    id: 'general',
+    name: '通用助手',
+    description: '全能通用智能助手，开箱即用，支持日常问答、代码分析、网络探索与多任务处理。',
+    avatar: '🧀',
+    tools: ['*'],
+    skills: [],
+    knowledge: [],
+    maxSteps: 30,
+    source: 'builtin',
+  };
+
+  const container = element('agent-dialog-content');
+  if (!container) return;
+  container.replaceChildren();
+
+  const header = node('div', 'agent-profile-header');
+  header.append(
+    node('div', 'agent-profile-avatar', agent.avatar || '🤖'),
+    (() => {
+      const meta = node('div', 'agent-profile-meta');
+      const title = node('div', 'agent-profile-title', agent.name);
+      title.append(node('span', `agent-source-badge ${agent.source || 'builtin'}`,
+        agent.source === 'builtin' ? '系统内置' : agent.source === 'workspace' ? '当前工作区' : '用户全局'
+      ));
+      meta.append(title, node('div', 'agent-profile-desc', agent.description || '暂无描述'));
+      return meta;
+    })()
+  );
+
+  // Section 1: Prompt
+  const promptSection = node('div', 'agent-detail-section');
+  promptSection.append(node('div', 'agent-detail-title', '角色设定与提示词 (System Prompt)'));
+  const promptPre = node('pre', 'agent-prompt-preview', agent.fullPrompt || agent.systemPrompt || '未指定额外提示词，使用基座默认通用设定。');
+  promptSection.append(promptPre);
+
+  // Section 2: Tools Whitelist
+  const toolsSection = node('div', 'agent-detail-section');
+  toolsSection.append(node('div', 'agent-detail-title', '工具权限白名单 (Tool Sandbox)'));
+  const toolsGrid = node('div', 'agent-tools-grid');
+  if (agent.tools?.includes('*')) {
+    toolsGrid.append(node('span', 'agent-tool-chip all-tools', '✨ 全部工具 (无限制)'));
+  } else if (agent.tools && agent.tools.length > 0) {
+    for (const t of agent.tools) {
+      toolsGrid.append(node('span', 'agent-tool-chip', t));
+    }
+  } else {
+    toolsGrid.append(node('span', 'agent-tool-chip', '仅基础只读与检索工具'));
+  }
+  toolsSection.append(toolsGrid);
+
+  // Section 3: Skills & Knowledge
+  const extraSection = node('div', 'agent-detail-section');
+  extraSection.append(node('div', 'agent-detail-title', '预设技能与知识库 (Skills & RAG)'));
+  const extraGrid = node('div', 'agent-tools-grid');
+  if (agent.skills && agent.skills.length > 0) {
+    for (const s of agent.skills) {
+      extraGrid.append(node('span', 'agent-tool-chip', `✨ 技能: ${s}`));
+    }
+  }
+  if (agent.knowledge && agent.knowledge.length > 0) {
+    for (const k of agent.knowledge) {
+      extraGrid.append(node('span', 'agent-tool-chip', `📚 知识库: ${k}`));
+    }
+  }
+  if ((!agent.skills || agent.skills.length === 0) && (!agent.knowledge || agent.knowledge.length === 0)) {
+    extraGrid.append(node('span', 'agent-tool-chip', '无预设技能与专属知识库'));
+  }
+  extraSection.append(extraGrid);
+
+  // Section 4: Execution limits
+  const limitSection = node('div', 'agent-detail-section');
+  limitSection.append(node('div', 'agent-detail-title', '安全执行上限'));
+  limitSection.append(node('div', 'agent-tool-chip', `单轮最大步数: ${agent.maxSteps || 30} 步`));
+
+  container.append(header, promptSection, toolsSection, extraSection, limitSection);
+
+  const dialog = element('agent-dialog');
+  if (dialog) dialog.showModal();
+}
+
 document.addEventListener('click', event => {
   const modelWrapper = event.target.closest('.model-picker-wrapper');
   if (!modelWrapper) closeModelPopover();
 
   const skillWrapper = event.target.closest('.skill-picker-wrapper');
   if (!skillWrapper) closeSkillPopover();
+
+  const agentWrapper = event.target.closest('.agent-picker-wrapper');
+  if (!agentWrapper) closeAgentPopover();
 
   if (!event.target.closest('#prompt') && !event.target.closest('#slash-autocomplete')) {
     const autoEl = element('slash-autocomplete');
@@ -1638,6 +1935,22 @@ element('popover-open-settings')?.addEventListener('click', () => openModelDialo
 element('close-model-dialog')?.addEventListener('click', closeModelDialog);
 element('model-label')?.addEventListener('click', toggleModelPopover);
 element('skill-label')?.addEventListener('click', toggleSkillPopover);
+element('agent-label')?.addEventListener('click', toggleAgentPopover);
+element('session-agent-badge')?.addEventListener('click', () => showAgentDetailsDialog(currentSession?.agentId || selectedAgentId));
+element('close-agent-dialog')?.addEventListener('click', () => element('agent-dialog')?.close());
+element('reload-agents-btn')?.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  try {
+    const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
+    const res = await api(`/agents/reload${query}`, {});
+    availableAgents = res.agents || [];
+    renderAgentCapsule();
+    renderAgentCards();
+    renderAgentPicker();
+  } catch (err) {
+    report(err);
+  }
+});
 element('test-model-btn')?.addEventListener('click', testCurrentModel);
 element('fetch-remote-models-btn')?.addEventListener('click', fetchRemoteModelsList);
 element('add-model-btn')?.addEventListener('click', () => resetModelForm(element('model-provider-select')?.value || 'deepseek'));
@@ -1766,6 +2079,7 @@ element('delete-model-btn')?.addEventListener('click', async () => {
 
 loadModels();
 loadSkills();
+loadAgents();
 setInterval(refresh, 2000);
 changeRoute();
 
