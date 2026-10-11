@@ -87,6 +87,18 @@
   - **斜杠快捷补全**：输入框键入 `/` 呼出悬浮补全菜单，支持键盘上下导航与 `Tab`/`Enter` 快速调用；
   - **首页快捷推荐**：自动将可用技能渲染为首页常用任务推荐卡片。
 
+### 10. 🧱 通用智能体基座与垂直领域资产包（Domain Packs & Dynamic Specialization）
+- **通用助手开箱即用（Builtin General Agent）**：默认以通用全能智能助手（`general`，🧀）运行，享有全量工具支持与通用多步推理规划能力；
+- **声明式资产包契约（Declarative `agent.json`）**：通过 Zod Schema 严谨定义 Agent 标识、名称、Emoji 头像、外部 `PROMPT.md` 提示词、模型偏好、工具白名单沙箱、默认绑定技能、多集合隔离知识库与单轮最大步数 `maxSteps`；
+- **双层资产包目录扫描（Dual-Directory Discovery）**：自动扫描用户全局定义（`~/.cheese/agents/`）与当前工作区本地定义（`<workspace>/.agents/`），支持按项目扩展专属领域 Agent，同名时工作区优先覆盖；
+- **工具权限白名单沙箱（Tool Whitelisting & Sandboxing）**：垂直 Agent 自动约束在专属工具白名单中（保留基础只读与检索工具），高危工具（`bash`、`file_write`、`spawn_agent`）需显式授权，提供严格的执行安全隔离；
+- **多集合向量知识库隔离（Multi-Collection RAG Isolation）**：`SqliteVectorStore` 支持 `collection_id` 集合切分与联合检索，为各领域 Agent 提供专属专精知识库检索与 MMR 语义重排序；
+- **会话级生命周期绑定与 Web 可视化工作台**：
+  - **工作台卡片选择**：首页呈现各领域 Agent 卡片，一键选定专业领域；
+  - **Toolbar 胶囊切换**：输入框工具栏提供 `🤖 Agent ▾` 胶囊支持即时切换并支持热重载（`↻ 重载`）；
+  - **会话顶部详情抽屉**：会话页提供 Agent 徽章与详情弹窗，实时透视 System Prompt、工具白名单沙箱与安全上限；
+  - **侧边栏会话身份透视**：侧边栏会话树以专属 Emoji 头像标识不同智能体，一目了然。
+
 ---
 
 ## 📂 项目架构与目录索引
@@ -107,7 +119,10 @@ cheese-agent/
 │   │   ├── loop-detection.ts    # 死循环工具调用检测器
 │   │   └── retry.ts             # 网络异常指数退避重试
 │   │
-│   ├── agents/                  # 派生子智能体系统 (Sub-Agents)
+│   ├── agents/                  # 垂直领域 Agent 体系与派生子智能体系统
+│   │   ├── manifest.ts          # agent.json 声明式清单 Zod Schema 与类型契约
+│   │   ├── loader.ts            # 双层目录扫描解析器与内置通用助手定义
+│   │   ├── domain-registry.ts   # 领域 Agent 运行时注册中枢与热重载池
 │   │   ├── registry.ts          # 子 Agent 状态机与并发配额管理
 │   │   ├── spawn.ts             # 单任务派发与 Fan-out 批量并行执行
 │   │   └── types.ts             # 深度控制与状态定义
@@ -193,6 +208,9 @@ cheese-agent/
 │   ├── index.html               # Kinpaku 极简工作台骨架与 Popover 容器
 │   ├── style.css                # 和纸白 / 仪器暗色双主题样式系统
 │   └── app.js                   # 状态驱动的轻量客户端与斜杠补全逻辑
+├── .agents/                     # 垂直领域 Agent 资产包示例库 (Domain Packs)
+│   ├── code-auditor/            # 代码审计专家 (只读工具沙箱 + 安全审计 SOP)
+│   └── tech-writer/             # 技术文档架构师 (Diátaxis 架构规范说明书)
 ├── .skills/                     # 项目工作区技能 SOP 库
 │   └── code-review-skill/       # 代码审查标准作业流程定义 (SKILL.md)
 ├── cheese-agent.config.json     # 核心运行配置文件
@@ -293,9 +311,39 @@ pnpm start
 | `exit` | 优雅退出系统并平合关闭定时任务与渠道监听 |
 
 ### 2. Web 工作台交互方式
+- **会话智能体选定**：无会话状态下点击首页专业领域卡片，或点击工具栏 `🤖 Agent ▾` 胶囊，即时选定或热重载领域智能体；
 - **会话技能多选**：点击底部工具栏的 `✨ 技能 (N) ▾` 胶囊，勾选当前会话启用的技能，SOP 将持续注入系统提示词中；
 - **斜杠快速补全**：在任务输入框以 `/` 开头输入，自动弹出模糊匹配的技能下拉列表，使用键盘方向键或 `Tab`/`Enter` 快速选定；
 - **首页一键启动**：无会话状态下，首页会自动展示已发现技能的快捷推荐卡片，点击即可预填指令。
+
+### 3. 垂直领域智能体资产包定制（Domain Packs）
+#### 目录规范
+在项目根目录创建 `.agents/<agent-id>/`（工作区私有），或在用户主目录创建 `~/.cheese/agents/<agent-id>/`（全机跨项目共享）：
+```text
+.agents/code-auditor/
+├── agent.json       # 智能体声明式清单 (身份、权限白名单、技能、知识库)
+└── PROMPT.md        # 领域专用系统提示词 (自动合入运行时 System Prompt)
+```
+
+#### 清单配置示例（`agent.json`）
+```json
+{
+  "id": "code-auditor",
+  "name": "代码审计专家",
+  "description": "专精代码安全审计、漏洞排查与工程架构坏味道分析，具备严格的只读沙箱权限",
+  "avatar": "🛡️",
+  "promptFile": "PROMPT.md",
+  "tools": ["file_read", "read_file", "search_files", "grep_search", "git_status", "git_diff", "git_log"],
+  "skills": ["code-review"],
+  "knowledge": ["security-audit"],
+  "maxSteps": 20
+}
+```
+
+#### 运行时沙箱与安全保障
+- **工具白名单沙箱**：垂直 Agent 自动限制在 `tools` 白名单定义的工具集合中，高危写操作与系统命令未声明时将被严格过滤，杜绝越权执行风险；
+- **知识库集合切分**：通过声明 `knowledge` 集合，Agent 可专精检索对应 `collection_id` 的领域向量库并进行 MMR 语义重排序；
+- **会话持久化与头像透视**：会话与 Agent 强绑定，历史会话树在侧边栏以专属 Emoji 标识，点击顶部详情徽章可快速透视沙箱规格与提示词。
 
 ---
 

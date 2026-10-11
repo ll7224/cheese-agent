@@ -1,0 +1,23 @@
+{
+  "id": "code-auditor",
+  "name": "代码审计专家",
+  "description": "专精代码安全审计、漏洞排查与工程架构坏味道分析，具备严格的只读沙箱权限",
+  "avatar": "🛡️",
+  "promptFile": "PROMPT.md",
+  "tools": [
+    "file_read",
+    "read_file",
+    "search_files",
+    "grep_search",
+    "git_status",
+    "git_diff",
+    "git_log"
+  ],
+  "skills": [
+    "code-review"
+  ],
+  "knowledge": [
+    "security-audit"
+  ],
+  "maxSteps": 20
+}
