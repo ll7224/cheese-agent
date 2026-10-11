@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { AgentLoader, type AgentDefinition, BUILTIN_GENERAL_AGENT } from './loader.js';
 
 /**
@@ -10,7 +11,7 @@ import { AgentLoader, type AgentDefinition, BUILTIN_GENERAL_AGENT } from './load
  */
 export class DomainAgentRegistry {
   private loader: AgentLoader;
-  private static instance?: DomainAgentRegistry;
+  private static instances = new Map<string, DomainAgentRegistry>();
 
   constructor(baseDir = '.', globalAgentsDir?: string) {
     this.loader = new AgentLoader(baseDir, globalAgentsDir);
@@ -18,13 +19,23 @@ export class DomainAgentRegistry {
   }
 
   /**
-   * 获取全局默认单例实例
+   * 按工作区基础路径获取对应注册中心实例（单例池化缓存）
    */
   static getInstance(baseDir = '.', globalAgentsDir?: string): DomainAgentRegistry {
-    if (!DomainAgentRegistry.instance) {
-      DomainAgentRegistry.instance = new DomainAgentRegistry(baseDir, globalAgentsDir);
+    const key = `${path.resolve(baseDir)}::${globalAgentsDir ? path.resolve(globalAgentsDir) : ''}`;
+    let instance = DomainAgentRegistry.instances.get(key);
+    if (!instance) {
+      instance = new DomainAgentRegistry(baseDir, globalAgentsDir);
+      DomainAgentRegistry.instances.set(key, instance);
     }
-    return DomainAgentRegistry.instance;
+    return instance;
+  }
+
+  /**
+   * 清空所有单例缓存（用于测试隔离）
+   */
+  static clearInstances(): void {
+    DomainAgentRegistry.instances.clear();
   }
 
   /**

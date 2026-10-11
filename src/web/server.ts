@@ -14,6 +14,7 @@ import { FeishuChannel } from '../channels/feishu.js';
 import { selectLocalDirectory } from './directory-picker.js';
 import { PROVIDER_PRESETS, testConnection, fetchRemoteModels } from '../runtime/model-store.js';
 import { SkillLoader } from '../skills/loader.js';
+import { DomainAgentRegistry } from '../agents/domain-registry.js';
 
 export function createApp(runtime: Runtime, chooseDirectory: () => Promise<string | null> = selectLocalDirectory) {
   const app = new Hono();
@@ -106,6 +107,26 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
     return context.json({ skills: loader.load() });
   });
 
+  app.get('/api/v1/agents', context => {
+    const workspaceId = context.req.query('workspaceId');
+    let targetDir = process.cwd();
+    if (workspaceId) {
+      targetDir = runtime.workspace(workspaceId).path;
+    }
+    const registry = DomainAgentRegistry.getInstance(targetDir);
+    return context.json({ agents: registry.list() });
+  });
+
+  app.post('/api/v1/agents/reload', context => {
+    const workspaceId = context.req.query('workspaceId');
+    let targetDir = process.cwd();
+    if (workspaceId) {
+      targetDir = runtime.workspace(workspaceId).path;
+    }
+    const registry = DomainAgentRegistry.getInstance(targetDir);
+    return context.json({ agents: registry.reload() });
+  });
+
   app.get('/api/v1/sessions', context => {
     const offset = Number(context.req.query('offset') || 0);
     const requestedLimit = Number(context.req.query('limit') || 50);
@@ -115,7 +136,7 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
   });
   app.post('/api/v1/sessions', async context => {
     const body = await context.req.json();
-    return context.json(runtime.createSession(body.workspaceId, body.modelId, body.activeSkills), 201);
+    return context.json(runtime.createSession(body.workspaceId, body.modelId, body.activeSkills, body.agentId), 201);
   });
   app.post('/api/v1/sessions/:id/model', async context => {
     const body = await context.req.json();
@@ -126,6 +147,11 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
     const body = await context.req.json();
     if (!body || !Array.isArray(body.skills)) throw new RuntimeError('缺少有效的 skills 数组参数');
     return context.json(runtime.updateSessionSkills(context.req.param('id'), body.skills));
+  });
+  app.post('/api/v1/sessions/:id/agent', async context => {
+    const body = await context.req.json();
+    if (!body?.agentId || typeof body.agentId !== 'string') throw new RuntimeError('缺少有效的 agentId 参数');
+    return context.json(runtime.updateSessionAgent(context.req.param('id'), body.agentId));
   });
   app.get('/api/v1/sessions/:id', context => context.json({ ...runtime.session(context.req.param('id')), runs: runtime.state.runs.filter(run => run.sessionId === context.req.param('id')), events: runtime.state.events.filter(event => event.sessionId === context.req.param('id')) }));
   app.get('/api/v1/runs/:id/events', context => {

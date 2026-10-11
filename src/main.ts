@@ -46,6 +46,7 @@ import { CronService } from './cron/service.js';
 import { createCronTool } from './tools/cron-tools.js';
 import { createCronCommands } from './commands/cron.js';
 import { SubAgentRegistry } from './agents/registry.js';
+import { DomainAgentRegistry } from './agents/domain-registry.js';
 import { createSpawnTool } from './tools/spawn-tools.js';
 import { createAgentCommands } from './commands/agent.js';
 import type { SpawnContext } from './agents/spawn.js';
@@ -397,9 +398,18 @@ export async function startAgent() {
 export async function runTask(messages: ModelMessage[], options: ExecutionOptions = {}) {
   await connectMCP();
   skillLoader.load();
+
+  // 1. 获取并激活当前会话绑定的领域 Agent
+  const domainRegistry = DomainAgentRegistry.getInstance(process.cwd());
+  const agent = domainRegistry.get(options.agentId);
+
+  // 2. 激活领域技能
   if (options.activeSkills) {
     activeSkills.clear();
     for (const s of options.activeSkills) activeSkills.add(s);
+  }
+  if (agent.skills && agent.skills.length > 0) {
+    for (const s of agent.skills) activeSkills.add(s);
   }
 
   // 支持输入形如 /<skill-name> [args] 的一次性快捷触发
@@ -418,6 +428,33 @@ export async function runTask(messages: ModelMessage[], options: ExecutionOption
 
   registry.register(createSpawnTool(agentRegistry, () => ({ ...getSpawnCtx(), ...options })));
   if (options.manageCron) registry.register({ ...createCronTool(cronService), execute: options.manageCron });
+
+  // 3. 动态组装系统提示词（融入领域专用 Prompt）
+  let systemPrompt = builder.build(makePromptCtx());
+  if (agent.fullPrompt) {
+    systemPrompt = `# 领域角色与设定: ${agent.name} (${agent.avatar})\n${agent.fullPrompt}\n\n${systemPrompt}`;
+  }
+
+  // 4. 工具权限白名单过滤沙箱
+  const BASELINE_TOOLS = [
+    'file_read',
+    'read_file',
+    'memory_save',
+    'memory_get',
+    'memory_search',
+    'rag_search',
+    'rag_ingest',
+    'tool_search',
+  ];
+  const effectiveRegistry = agent.tools.includes('*')
+    ? registry
+    : registry.fork(new Set(), Array.from(new Set([...BASELINE_TOOLS, ...agent.tools])));
+
+  const execOptions: ExecutionOptions = {
+    ...options,
+    maxSteps: agent.maxSteps || options.maxSteps,
+  };
+
   try {
     for (const plugin of config.plugins.filter(item => item.enabled)) {
       const definition = availablePlugins.get(plugin.name);
@@ -425,6 +462,6 @@ export async function runTask(messages: ModelMessage[], options: ExecutionOption
       if (Object.values(plugin.config).some(value => !['string', 'number', 'boolean'].includes(typeof value))) throw new Error(`插件 ${plugin.name} 的配置值必须为字符串、数字或布尔值`);
       await pluginManager.load(definition, plugin.config as Record<string, string | number | boolean>);
     }
-    await agentLoop(model, registry, messages, builder.build(makePromptCtx()), undefined, options);
+    await agentLoop(model, effectiveRegistry, messages, systemPrompt, undefined, execOptions);
   } finally { await registry.closeAllMCP(); await pluginManager.unloadAll(); }
 }

@@ -119,10 +119,11 @@ export async function agentLoop(
 ) {
   let step = 0;
   let totalTokens = 0;
+  const maxSteps = options.maxSteps || MAX_STEPS;
   // 每次进入 Agent 任务前重置死循环检测的历史记录
   resetHistory();
 
-  while (step < MAX_STEPS) {
+  while (step < maxSteps) {
     options.signal?.throwIfAborted();
     step++;
     console.log(`\n--- Step ${step} ---`);
@@ -345,7 +346,7 @@ export async function agentLoop(
     console.log('  → 继续下一步...');
   }
 
-  if (step >= MAX_STEPS) {
+  if (step >= maxSteps) {
     console.log('\n[达到最大步数]');
   }
 }

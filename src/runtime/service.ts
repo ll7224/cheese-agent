@@ -12,18 +12,22 @@ import { CronService } from '../cron/service.js';
 import { createCronTool } from '../tools/cron-tools.js';
 import { ModelStore, type StoredModel, type MaskedModel, testConnection, fetchRemoteModels } from './model-store.js';
 import type { CheeseAgentConfig } from '../config/schema.js';
+import { DomainAgentRegistry } from '../agents/domain-registry.js';
 
 export interface Workspace { id: string; path: string; name: string }
-export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot; source?: string; modelId?: string; activeSkills?: string[] }
+export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot; source?: string; modelId?: string; activeSkills?: string[]; agentId?: string }
 export interface Run { id: string; sessionId: string; key: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'stopping' | 'cancelled' | 'interrupted'; error?: string; messageOffset?: number; input?: string }
 interface State { workspaces: Workspace[]; sessions: Session[]; runs: Run[]; events: ExecutionEvent[] }
 function readState(file: string): State {
   const state = JSON.parse(readFileSync(file, 'utf8'));
   if (!state || !['workspaces', 'sessions', 'runs'].every(key => Array.isArray(state[key])) || (state.events && !Array.isArray(state.events))) throw new Error('无效会话快照');
   if (state.workspaces.some((workspace: any) => !workspace?.id || typeof workspace.path !== 'string') || state.sessions.some((session: any) => !session?.id || !Array.isArray(session.messages) || !state.workspaces.some((workspace: any) => workspace.id === session.workspaceId)) || state.runs.some((run: any) => !run?.id || !state.sessions.some((session: any) => session.id === run.sessionId))) throw new Error('会话快照关联已损坏');
+  for (const session of state.sessions) {
+    session.agentId ||= 'general';
+  }
   return state;
 }
-export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; activeSkills?: string[]; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void>; manageCron: (input: any) => Promise<unknown>; signal: AbortSignal }
+export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; activeSkills?: string[]; agentId?: string; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void>; manageCron: (input: any) => Promise<unknown>; signal: AbortSignal }
 export type Executor = (execution: Execution) => Promise<ModelMessage[]>;
 export class RuntimeError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -141,7 +145,7 @@ export class Runtime {
     catch { return false; }
   }
 
-  createSession(workspaceId: string, modelId?: string, activeSkills: string[] = []) {
+  createSession(workspaceId: string, modelId?: string, activeSkills: string[] = [], agentId?: string) {
     if (!this.available(this.workspace(workspaceId))) throw new RuntimeError('工作目录已不可用');
     const defaultModel = this.modelStore.getDefault();
     const isModelUsable = (m?: StoredModel) => Boolean(m && (m.apiKey || m.provider === 'ollama' || m.provider === 'mock'));
@@ -156,6 +160,10 @@ export class Runtime {
       catch { console.warn(`目录 ${this.workspace(workspaceId).path} 的定时任务未启动，请检查目录配置；普通会话不受影响`); }
     }
     const cleanSkills = Array.from(new Set(Array.isArray(activeSkills) ? activeSkills.filter(s => typeof s === 'string' && s.trim()) : []));
+    const agentRegistry = DomainAgentRegistry.getInstance(this.workspace(workspaceId).path);
+    const agent = agentRegistry.get(agentId);
+    const resolvedSkills = cleanSkills.length > 0 ? cleanSkills : [...(agent.skills || [])];
+
     const session: Session = {
       id: randomUUID(),
       workspaceId,
@@ -164,9 +172,30 @@ export class Runtime {
       messages: [],
       config,
       modelId: modelId || selectedModel?.id,
-      activeSkills: cleanSkills,
+      activeSkills: resolvedSkills,
+      agentId: agent.id,
     };
     this.state.sessions.push(session);
+    this.save();
+    return session;
+  }
+
+  updateSessionAgent(sessionId: string, agentId: string): Session {
+    const session = this.session(sessionId);
+    if (!this.available(this.workspace(session.workspaceId))) throw new RuntimeError('工作目录已不可用');
+    if (this.state.runs.some(r => r.sessionId === sessionId && ['queued', 'running', 'stopping'].includes(r.status))) {
+      throw new RuntimeError('会话正在执行任务，请等待完成后再切换 Agent', 409);
+    }
+    const agentRegistry = DomainAgentRegistry.getInstance(this.workspace(session.workspaceId).path);
+    if (!agentRegistry.has(agentId) && agentId !== 'general') {
+      throw new RuntimeError('指定的 Agent 不存在', 404);
+    }
+    const agent = agentRegistry.get(agentId);
+    session.agentId = agent.id;
+    if (agent.skills && agent.skills.length > 0) {
+      session.activeSkills = Array.from(new Set([...(session.activeSkills || []), ...agent.skills]));
+    }
+    session.updatedAt = new Date().toISOString();
     this.save();
     return session;
   }
@@ -321,7 +350,7 @@ export class Runtime {
       const config = session.config ? resolveConfig(session.config) : undefined;
       secrets = collectSecrets(config);
       stream = redactStream(secrets, event => this.emit(run, { ...event, ...(event.childRunId ? { rootRunId: run.id, parentRunId: run.id } : {}) }, secrets));
-      const resultMessages = await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, activeSkills: session.activeSkills || [], emit: event => stream!.push(event), acquireChild: () => this.children.acquire(controller.signal), manageCron: input => { controller.signal.throwIfAborted(); return this.manageCron(workspace.id, input, config); }, signal: controller.signal });
+      const resultMessages = await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, activeSkills: session.activeSkills || [], agentId: session.agentId || 'general', emit: event => stream!.push(event), acquireChild: () => this.children.acquire(controller.signal), manageCron: input => { controller.signal.throwIfAborted(); return this.manageCron(workspace.id, input, config); }, signal: controller.signal });
       const currentModelName = config?.model?.name || session.config?.values?.model?.name;
       const reasoningEvents = this.events(run.id).filter(e => e.type === 'reasoning');
       const reasoningText = reasoningEvents.map(e => String(e.text || '')).join('');
