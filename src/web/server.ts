@@ -177,6 +177,8 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
   app.all('/api/*', context => context.json({ error: '接口不存在' }, 404));
   app.get('/app.js', context => context.body(readFileSync(new URL('../../web/app.js', import.meta.url), 'utf8'), 200, { 'Content-Type': 'text/javascript' }));
   app.get('/style.css', context => context.body(readFileSync(new URL('../../web/style.css', import.meta.url), 'utf8'), 200, { 'Content-Type': 'text/css' }));
+  app.get('/favicon.svg', context => context.body(readFileSync(new URL('../../web/favicon.svg', import.meta.url), 'utf8'), 200, { 'Content-Type': 'image/svg+xml' }));
+  app.get('/favicon.ico', context => context.body(readFileSync(new URL('../../web/favicon.svg', import.meta.url), 'utf8'), 200, { 'Content-Type': 'image/svg+xml' }));
   app.get('*', context => context.html(readFileSync(new URL('../../web/index.html', import.meta.url), 'utf8')));
   return app;
 }
