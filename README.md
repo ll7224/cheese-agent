@@ -445,6 +445,18 @@ You: 帮我创建一个每 10 分钟检查一次生产服务器健康状态的�
   - **Slash Autocomplete**: Type `/` in the prompt composer to trigger fuzzy autocomplete with arrow-key and Tab/Enter selection;
   - **Quick Prompts**: Automatically renders discovered skills as quick-start cards on the home screen.
 
+### 10. 🧱 General Agent Foundation & Domain Packs (Dynamic Specialization)
+- **Out-of-the-Box General Assistant**: Defaults to an all-round general intelligent assistant (`general`, 🧀) equipped with full tool access and multi-step reasoning capabilities.
+- **Declarative Manifest Contract (`agent.json`)**: Formulated with Zod schemas defining agent identity, name, emoji avatar, external `PROMPT.md` system prompt, tool whitelist sandbox, default skills, partitioned knowledge collections, and `maxSteps` execution ceiling.
+- **Dual-Directory Asset Discovery**: Scans both user-level global agents (`~/.cheese/agents/`) and workspace-local agents (`<workspace>/.agents/`), allowing plug-and-play project specialization without recompilation.
+- **Tool Whitelisting & Sandboxing**: Specialized agents operate within strict tool whitelists (retaining baseline read and retrieval tools); destructive operations (`bash`, `file_write`, `spawn_agent`) are blocked unless explicitly whitelisted.
+- **Multi-Collection Vector Knowledge Isolation**: `SqliteVectorStore` partitions embeddings and FTS5 documents by `collection_id`, providing isolated domain retrieval and MMR semantic reranking.
+- **Session Lifecycle Binding & Web Workbench Integration**:
+  - **Home Screen Domain Cards**: Visual selection grid for specialized agents on empty session state;
+  - **Toolbar Agent Capsule**: Rapid switching and one-click hot-reload (`↻ Reload`) via `🤖 Agent ▾`;
+  - **Session Header Profile Badge**: Click to inspect active system prompts, whitelisted tools, and execution safety ceilings;
+  - **Sidebar Session Avatars**: Session trees visibly distinct with bound agent emoji icons.
+
 ---
 
 ## 📂 Project Structure & Architecture
@@ -465,8 +477,11 @@ cheese-agent/
 │   │   ├── loop-detection.ts    # Infinite loop detector
 │   │   └── retry.ts             # Exponential backoff retry handler
 │   │
-│   ├── agents/                  # Ephemeral Sub-Agent orchestration
-│   │   ├── registry.ts          # State machine and concurrency quota manager
+│   ├── agents/                  # Domain Agent platform & Sub-Agent orchestration
+│   │   ├── manifest.ts          # agent.json declarative schema & types
+│   │   ├── loader.ts            # Dual-directory scanner & builtin general agent
+│   │   ├── domain-registry.ts   # Domain agent runtime registry & pool
+│   │   ├── registry.ts          # Sub-agent state machine and concurrency manager
 │   │   ├── spawn.ts             # Task dispatch and parallel fan-out runner
 │   │   └── types.ts             # Sub-agent state contracts and limits
 │   │
@@ -483,7 +498,7 @@ cheese-agent/
 │   │   └── hooks.ts             # AOP Pre/Post execution hooks
 │   │
 │   ├── rag/                     # Retrieval-Augmented Generation
-│   │   ├── sqlite-store.ts      # sqlite-vec vector storage driver
+│   │   ├── sqlite-store.ts      # sqlite-vec multi-collection storage driver
 │   │   ├── embedder.ts          # 1024-dim embedding client with cache
 │   │   ├── chunker.ts           # Semantic Markdown AST chunker
 │   │   ├── search.ts            # Hybrid vector search algorithm
@@ -551,6 +566,9 @@ cheese-agent/
 │   ├── index.html               # Kinpaku UI workbench markup & popovers
 │   ├── style.css                # Washi Light & Instrument Dark themes
 │   └── app.js                   # Lightweight reactive client & slash autocomplete
+├── .agents/                     # Specialized Domain Agent Packs
+│   ├── code-auditor/            # Code security audit specialist
+│   └── tech-writer/             # Technical architecture & docs specialist
 ├── .skills/                     # Workspace Skill SOP repository
 │   └── code-review-skill/       # Code review SOP definition (SKILL.md)
 ├── cheese-agent.config.json     # Primary runtime configuration
@@ -651,9 +669,39 @@ Prefix commands with `/` in the interactive console:
 | `exit` | Gracefully terminate all active background jobs, channels, and loops |
 
 ### 2. Web Workbench Controls
+- **Domain Agent Selection**: Select specialized agents directly from the home screen grid, or toggle/hot-reload instantly via the `🤖 Agent ▾` capsule on the composer toolbar;
 - **Session Skills Popover**: Click the `✨ 技能 (N) ▾` badge in the composer toolbar to select active skills for the current session; SOP instructions are injected into system prompts across runs;
 - **Slash Autocomplete**: Type `/` in the task composer to trigger fuzzy autocomplete with keyboard navigation (`ArrowUp`/`ArrowDown`/`Tab`/`Enter`);
 - **Home Quick Prompts**: Discovered skills automatically populate as quick-start cards on the home screen.
+
+### 3. Customizing Domain Agent Packs
+#### Directory Convention
+Create `.agents/<agent-id>/` under the workspace root (workspace-local) or `~/.cheese/agents/<agent-id>/` under the user home directory (machine-global):
+```text
+.agents/code-auditor/
+├── agent.json       # Declarative manifest (identity, tool whitelist sandbox, skills, knowledge)
+└── PROMPT.md        # Domain-specific system prompt (merged into runtime system prompt)
+```
+
+#### Manifest Example (`agent.json`)
+```json
+{
+  "id": "code-auditor",
+  "name": "Code Auditor",
+  "description": "Specialized in security auditing, vulnerability discovery, and anti-pattern analysis with strict read-only tool sandbox",
+  "avatar": "🛡️",
+  "promptFile": "PROMPT.md",
+  "tools": ["file_read", "read_file", "search_files", "grep_search", "git_status", "git_diff", "git_log"],
+  "skills": ["code-review"],
+  "knowledge": ["security-audit"],
+  "maxSteps": 20
+}
+```
+
+#### Runtime Sandbox & Security Isolation
+- **Tool Whitelist Sandboxing**: Specialized agents are constrained to the exact toolset defined in `tools`. High-risk mutations and system commands are pruned unless explicitly whitelisted;
+- **Knowledge Collection Partitioning**: Specifying `knowledge` collections enables focused retrieval on the corresponding `collection_id` in SQLite-vec with MMR semantic reranking;
+- **Persistent Session Binding & Visual Inspection**: Sessions lock their bound agent, labeled with the agent's emoji avatar in the sidebar. Click the top-bar agent badge to inspect prompt instructions and tool permissions anytime.
 
 ---
 
