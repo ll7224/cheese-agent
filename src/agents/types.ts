@@ -40,7 +40,7 @@ export interface SubAgentRun {
   /** 指派的具体任务内容 */
   task: string;
   /** 运行生命周期状态：运行中、已完成、发生异常、超时终止 */
-  status: 'running' | 'completed' | 'error' | 'timeout';
+  status: 'queued' | 'running' | 'completed' | 'error' | 'timeout' | 'cancelled';
   /** 当前所处的调用嵌套深度（父 Agent 深度为 0） */
   depth: number;
   /** 任务启动时间戳（ISO 字符串） */

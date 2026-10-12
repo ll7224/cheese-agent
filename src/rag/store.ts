@@ -29,15 +29,18 @@ export class VectorStore {
    *
    * @param chunk 文本切片对象
    * @param embedding 对应的向量表示
+   * @param collectionId 可选所属集合 ID（默认 'default'）
    */
-  add(chunk: Chunk, embedding: number[]): void {
+  add(chunk: Chunk, embedding: number[], collectionId?: string): void {
+    const colId = collectionId || chunk.collectionId || 'default';
+    const item: StoredChunk = { ...chunk, collectionId: colId, embedding, addedAt: Date.now() };
     const existing = this.chunks.findIndex((c) => c.id === chunk.id);
     if (existing >= 0) {
       // 存在则更新
-      this.chunks[existing] = { ...chunk, embedding, addedAt: Date.now() };
+      this.chunks[existing] = item;
     } else {
       // 不存在则追加
-      this.chunks.push({ ...chunk, embedding, addedAt: Date.now() });
+      this.chunks.push(item);
     }
   }
 
@@ -45,39 +48,60 @@ export class VectorStore {
    * 批量添加切片和向量。
    *
    * @param items 包含 chunk 与对应 embedding 的数组
+   * @param defaultCollectionId 默认所属集合 ID
    */
-  addBatch(items: Array<{ chunk: Chunk; embedding: number[] }>): void {
-    for (const { chunk, embedding } of items) {
-      this.add(chunk, embedding);
+  addBatch(items: Array<{ chunk: Chunk; embedding: number[]; collectionId?: string }>, defaultCollectionId?: string): void {
+    for (const { chunk, embedding, collectionId } of items) {
+      this.add(chunk, embedding, collectionId || defaultCollectionId);
     }
   }
 
   /**
    * 获取当前向量库中的全部切片数据（包括其向量与元信息）。
    * 供检索器（Searcher）做全库打分或遍历匹配使用。
+   *
+   * @param collectionIds 可选指定的集合 ID 列表过滤
    */
-  getAll(): StoredChunk[] {
-    return this.chunks;
+  getAll(collectionIds?: string[]): StoredChunk[] {
+    if (!collectionIds) return this.chunks;
+    if (collectionIds.length === 0) return [];
+    const set = new Set(collectionIds);
+    return this.chunks.filter((c) => set.has(c.collectionId || 'default'));
   }
 
   /**
    * 获取当前库内切片的总条数。
+   *
+   * @param collectionIds 可选集合 ID 或集合 ID 列表
    */
-  size(): number {
-    return this.chunks.length;
+  size(collectionIds?: string[] | string): number {
+    if (!collectionIds) return this.chunks.length;
+    const filter = Array.isArray(collectionIds) ? collectionIds : [collectionIds];
+    return this.getAll(filter).length;
   }
 
   /**
-   * 清空整个向量库。
+   * 清空整个向量库或指定集合。
+   *
+   * @param collectionId 可选清空指定的集合
    */
-  clear(): void {
-    this.chunks = [];
+  clear(collectionId?: string): void {
+    if (!collectionId) {
+      this.chunks = [];
+    } else {
+      this.chunks = this.chunks.filter((c) => (c.collectionId || 'default') !== collectionId);
+    }
   }
 
   /**
    * 获取向量库中所有不重复的文档来源列表（如文件路径或 URL 集合）。
+   *
+   * @param collectionIds 可选指定集合 ID 过滤
    */
-  sources(): string[] {
-    return [...new Set(this.chunks.map((c) => c.source))];
+  sources(collectionIds?: string[] | string): string[] {
+    const list = collectionIds
+      ? this.getAll(Array.isArray(collectionIds) ? collectionIds : [collectionIds])
+      : this.chunks;
+    return [...new Set(list.map((c) => c.source))];
   }
 }

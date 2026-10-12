@@ -2,6 +2,8 @@
 
 [中文 (Chinese)](#-cheese-agent-中文) | [English](#-cheese-agent-english)
 
+本机 Web 工作台：`npm run web` → `http://127.0.0.1:3210`。支持多目录、多会话并发和任务树停止，详见[安装与使用](docs/local-web-workbench.md)及[验收记录](docs/verification/local-agent-ui.md)。
+
 ---
 
 # 🧀 Cheese Agent (中文)
@@ -70,7 +72,32 @@
 ### 7. 🔌 多通道协作网关与协议集成（Gateway & Plugins）
 - **企业协作接入**：基于 Hono 框架与飞书 SDK，支持机器人事件监听、消息异步回调与长会话隔离。
 - **MCP 协议支持**：支持以客户端形式动态接入 GitHub 官方等符合 Model Context Protocol 规范的外部工具服务。
-- **插件系统与技能（Skills）**：支持动态热插拔 Supabase 扩展插件与基于 Markdown 定义的技能增强库。
+- **插件系统扩展**：支持动态热插拔 Supabase 等外部工程工具能力。
+
+### 8. 🖥️ 本机 Web 工作台与动态模型管理（Web Workbench & Custom LLMs）
+- **Impeccable Kinpaku 极简设计系统**：原生极简 Web 工作台（`npm run web`），采用“和纸白（Washi Light）”与“仪器暗色（Instrument Dark）”双主题，支持时间自适应与手动切换。
+- **实时深度可观测性**：基于 Hono SSE 流式传输，实时透视模型思考链（Reasoning/Thinking Block）、工具执行流、任务树状态与停止控制。
+- **多模型配置与测速中心**：支持直连 DeepSeek、通义千问、Moonshot 或自定义 OpenAI 兼容网关；支持动态拉取远程模型清单、端点连通性测试与毫秒级延迟测速，支持会话级模型灵活切换。
+
+### 9. ✨ 领域技能 SOP 体系与跨端集成（Skill SOP Architecture）
+- **基于 Prompt 工程的领域 SOP 封装**：区别于代码层工具插件（Tools），Skills 是以纯 Markdown + YAML Frontmatter 编写的领域标准作业流程（如 `code-review` 代码审查、架构分析）。
+- **双层目录扫描与同名覆盖（Dual-Directory Resolution）**：自动扫描用户全局技能目录（`~/.cheese/skills/`）与当前项目工作区目录（`<workspace>/.skills/`）；同名时工作区局部技能优先覆盖。
+- **跨进程调度与会话生命周期绑定**：
+  - **持久化绑定**：Toolbar 技能胶囊多选配置，即时持久化至 `state.json` 会话状态（具备 409 任务并发冲突保护），并通过跨进程 IPC 首包自动注入 Worker 子进程的系统提示词；
+  - **斜杠快捷补全**：输入框键入 `/` 呼出悬浮补全菜单，支持键盘上下导航与 `Tab`/`Enter` 快速调用；
+  - **首页快捷推荐**：自动将可用技能渲染为首页常用任务推荐卡片。
+
+### 10. 🧱 通用智能体基座与垂直领域资产包（Domain Packs & Dynamic Specialization）
+- **通用助手开箱即用（Builtin General Agent）**：默认以通用全能智能助手（`general`，🧀）运行，享有全量工具支持与通用多步推理规划能力；
+- **声明式资产包契约（Declarative `agent.json`）**：通过 Zod Schema 严谨定义 Agent 标识、名称、Emoji 头像、外部 `PROMPT.md` 提示词、模型偏好、工具白名单沙箱、默认绑定技能、多集合隔离知识库与单轮最大步数 `maxSteps`；
+- **双层资产包目录扫描（Dual-Directory Discovery）**：自动扫描用户全局定义（`~/.cheese/agents/`）与当前工作区本地定义（`<workspace>/.agents/`），支持按项目扩展专属领域 Agent，同名时工作区优先覆盖；
+- **工具权限白名单沙箱（Tool Whitelisting & Sandboxing）**：垂直 Agent 自动约束在专属工具白名单中（保留基础只读与检索工具），高危工具（`bash`、`file_write`、`spawn_agent`）需显式授权，提供严格的执行安全隔离；
+- **多集合向量知识库隔离（Multi-Collection RAG Isolation）**：`SqliteVectorStore` 支持 `collection_id` 集合切分与联合检索，为各领域 Agent 提供专属专精知识库检索与 MMR 语义重排序；
+- **会话级生命周期绑定与 Web 可视化工作台**：
+  - **工作台卡片选择**：首页呈现各领域 Agent 卡片，一键选定专业领域；
+  - **Toolbar 胶囊切换**：输入框工具栏提供 `🤖 Agent ▾` 胶囊支持即时切换并支持热重载（`↻ 重载`）；
+  - **会话顶部详情抽屉**：会话页提供 Agent 徽章与详情弹窗，实时透视 System Prompt、工具白名单沙箱与安全上限；
+  - **侧边栏会话身份透视**：侧边栏会话树以专属 Emoji 头像标识不同智能体，一目了然。
 
 ---
 
@@ -92,7 +119,10 @@ cheese-agent/
 │   │   ├── loop-detection.ts    # 死循环工具调用检测器
 │   │   └── retry.ts             # 网络异常指数退避重试
 │   │
-│   ├── agents/                  # 派生子智能体系统 (Sub-Agents)
+│   ├── agents/                  # 垂直领域 Agent 体系与派生子智能体系统
+│   │   ├── manifest.ts          # agent.json 声明式清单 Zod Schema 与类型契约
+│   │   ├── loader.ts            # 双层目录扫描解析器与内置通用助手定义
+│   │   ├── domain-registry.ts   # 领域 Agent 运行时注册中枢与热重载池
 │   │   ├── registry.ts          # 子 Agent 状态机与并发配额管理
 │   │   ├── spawn.ts             # 单任务派发与 Fan-out 批量并行执行
 │   │   └── types.ts             # 深度控制与状态定义
@@ -121,6 +151,20 @@ cheese-agent/
 │   │   ├── parser.ts            # 相对时间与 Cron 表达式解析器
 │   │   ├── store.ts             # 定时任务磁盘持久化
 │   │   └── types.ts             # 任务状态与调度合约
+│   │
+│   ├── skills/                  # 领域技能 SOP 解析与动态提示词装配
+│   │   └── loader.ts            # 全局与工作区双目录加载器、Frontmatter解析与注入
+│   │
+│   ├── runtime/                 # 多进程 Worker 与会话执行调度层
+│   │   ├── service.ts           # 会话管理、409 并发保护、工作区与任务树调度
+│   │   ├── worker.ts            # 子进程任务执行工作线程
+│   │   ├── worker-client.ts     # IPC 进程间通信与首包参数装载
+│   │   ├── model-store.ts       # 模型密钥持久化、端点测速与模型列表管理
+│   │   └── events.ts            # 结构化事件流定义与敏感信息脱敏
+│   │
+│   ├── web/                     # Hono HTTP Web 服务端与 API 网关
+│   │   ├── server.ts            # REST API、安全中间件与 SSE 事件流端点
+│   │   └── directory-picker.ts  # 原生系统文件夹选择器集成
 │   │
 │   ├── channels/                # 通讯渠道网关
 │   │   ├── gateway.ts           # 多渠道统一调度网关
@@ -160,6 +204,15 @@ cheese-agent/
 │   └── usage/                   # 计量计费与 Token 统计
 │       └── tracker.ts           # 消费账本与价格矩阵追踪器
 │
+├── web/                         # Web 工作台前端 (HTML/CSS/JS)
+│   ├── index.html               # Kinpaku 极简工作台骨架与 Popover 容器
+│   ├── style.css                # 和纸白 / 仪器暗色双主题样式系统
+│   └── app.js                   # 状态驱动的轻量客户端与斜杠补全逻辑
+├── .agents/                     # 垂直领域 Agent 资产包示例库 (Domain Packs)
+│   ├── code-auditor/            # 代码审计专家 (只读工具沙箱 + 安全审计 SOP)
+│   └── tech-writer/             # 技术文档架构师 (Diátaxis 架构规范说明书)
+├── .skills/                     # 项目工作区技能 SOP 库
+│   └── code-review-skill/       # 代码审查标准作业流程定义 (SKILL.md)
 ├── cheese-agent.config.json     # 核心运行配置文件
 ├── tsconfig.json                # TypeScript 编译选项
 └── package.json
@@ -217,6 +270,16 @@ pnpm run init
 ```
 
 ### 5. 启动运行
+
+#### 方式 A：启动本机 Web 工作台（推荐 ✨）
+```bash
+# 启动本地高质感 Web 工作台
+pnpm run web
+# 或 npm run web
+```
+启动后访问 `http://127.0.0.1:3210`，即可享受 Kinpaku 极简主题、多目录项目管理、实时思考链透视、自定义模型配置中心与技能 SOP 胶囊管理。
+
+#### 方式 B：CLI 交互终端
 ```bash
 # 开发监听模式
 pnpm run dev
@@ -227,12 +290,15 @@ pnpm start
 
 ---
 
-## 💬 控制台常用交互指令
+## 💬 交互指令与技能调用
 
-在终端会话中输入 `/` 即可触发各类系统观测与管理命令：
+### 1. 控制台常用管理指令
+在终端会话中输入 `/` 即可触发系统观测与管理命令：
 
 | 指令 | 作用与说明 |
 | :--- | :--- |
+| `/<skill-name> [参数]` | **单次执行特定技能 SOP**（如 `/code-review src/main.ts`，自动加载并注入领域流程） |
+| `/skills` | 查看当前工作区及全局已发现的所有可用技能清单 |
 | `/agents` | 查看所有子 Agent 运行记录、当前并发数及状态（运行中/完成/超时） |
 | `/role [owner\|collaborator\|guest]` | 查看或即时切换当前安全权限角色 |
 | `/hooks` | 查看安全防御管道已挂载的 Pre-Hook 与 Post-Hook 审计钩子 |
@@ -243,6 +309,41 @@ pnpm start
 | `/channels` | 查看飞书等外部通讯网关的监听端口与连通性 |
 | `/plugins` | 查看已加载的外部插件状态（如 Supabase） |
 | `exit` | 优雅退出系统并平合关闭定时任务与渠道监听 |
+
+### 2. Web 工作台交互方式
+- **会话智能体选定**：无会话状态下点击首页专业领域卡片，或点击工具栏 `🤖 Agent ▾` 胶囊，即时选定或热重载领域智能体；
+- **会话技能多选**：点击底部工具栏的 `✨ 技能 (N) ▾` 胶囊，勾选当前会话启用的技能，SOP 将持续注入系统提示词中；
+- **斜杠快速补全**：在任务输入框以 `/` 开头输入，自动弹出模糊匹配的技能下拉列表，使用键盘方向键或 `Tab`/`Enter` 快速选定；
+- **首页一键启动**：无会话状态下，首页会自动展示已发现技能的快捷推荐卡片，点击即可预填指令。
+
+### 3. 垂直领域智能体资产包定制（Domain Packs）
+#### 目录规范
+在项目根目录创建 `.agents/<agent-id>/`（工作区私有），或在用户主目录创建 `~/.cheese/agents/<agent-id>/`（全机跨项目共享）：
+```text
+.agents/code-auditor/
+├── agent.json       # 智能体声明式清单 (身份、权限白名单、技能、知识库)
+└── PROMPT.md        # 领域专用系统提示词 (自动合入运行时 System Prompt)
+```
+
+#### 清单配置示例（`agent.json`）
+```json
+{
+  "id": "code-auditor",
+  "name": "代码审计专家",
+  "description": "专精代码安全审计、漏洞排查与工程架构坏味道分析，具备严格的只读沙箱权限",
+  "avatar": "🛡️",
+  "promptFile": "PROMPT.md",
+  "tools": ["file_read", "read_file", "search_files", "grep_search", "git_status", "git_diff", "git_log"],
+  "skills": ["code-review"],
+  "knowledge": ["security-audit"],
+  "maxSteps": 20
+}
+```
+
+#### 运行时沙箱与安全保障
+- **工具白名单沙箱**：垂直 Agent 自动限制在 `tools` 白名单定义的工具集合中，高危写操作与系统命令未声明时将被严格过滤，杜绝越权执行风险；
+- **知识库集合切分**：通过声明 `knowledge` 集合，Agent 可专精检索对应 `collection_id` 的领域向量库并进行 MMR 语义重排序；
+- **会话持久化与头像透视**：会话与 Agent 强绑定，历史会话树在侧边栏以专属 Emoji 标识，点击顶部详情徽章可快速透视沙箱规格与提示词。
 
 ---
 
@@ -329,7 +430,32 @@ You: 帮我创建一个每 10 分钟检查一次生产服务器健康状态的�
 ### 7. 🔌 Multi-Channel Collaboration & Protocol Extensibility
 - **Enterprise Messaging**: Hono-based webhook gateway supporting Feishu (Lark) enterprise bots with event dispatch and async streaming replies.
 - **MCP Client Integration**: Built-in client support for external servers conforming to Anthropic's Model Context Protocol (e.g., GitHub MCP Server).
-- **Extensible Plugins & Skills**: Hot-pluggable plugin architecture (e.g., Supabase) and filesystem-based Markdown skill packs.
+- **Extensible Plugins**: Hot-pluggable plugin architecture (e.g., Supabase engineering tools).
+
+### 8. 🖥️ Local Web Workbench & Kinpaku Design System
+- **Impeccable Kinpaku UI**: Beautiful, lightweight, local-first web workbench (`npm run web`), featuring Washi Light and Instrument Dark themes with time-based auto switching.
+- **Real-Time Deep Observability**: SSE-driven live stream of the model's reasoning/thinking chain, tool executions, subtask tree, and instant cancellation controls.
+- **Custom Model Management & Speed Testing**: Easily connect DeepSeek, Qwen, Moonshot, or arbitrary OpenAI-compatible endpoints with dynamic model list fetching, connection ping tests, and session-level switching.
+
+### 9. ✨ Skill SOP Architecture & Multi-Directory Resolution
+- **Prompt-Engineered SOP Packs**: Distinct from code-level Tool plugins, Skills are standard operating procedures written in Markdown with YAML frontmatter (e.g., `code-review`).
+- **Dual-Directory Resolution**: Scans both user-level global skills (`~/.cheese/skills/`) and project workspace skills (`<workspace>/.skills/`), with workspace skills overriding global ones on name collisions.
+- **Inter-Process Dispatch & Lifecycle Binding**:
+  - **Persistent Session Binding**: Configure active skills via the toolbar capsule popover, saved durably in `state.json` with 409 concurrency protection and transmitted to Worker processes via IPC;
+  - **Slash Autocomplete**: Type `/` in the prompt composer to trigger fuzzy autocomplete with arrow-key and Tab/Enter selection;
+  - **Quick Prompts**: Automatically renders discovered skills as quick-start cards on the home screen.
+
+### 10. 🧱 General Agent Foundation & Domain Packs (Dynamic Specialization)
+- **Out-of-the-Box General Assistant**: Defaults to an all-round general intelligent assistant (`general`, 🧀) equipped with full tool access and multi-step reasoning capabilities.
+- **Declarative Manifest Contract (`agent.json`)**: Formulated with Zod schemas defining agent identity, name, emoji avatar, external `PROMPT.md` system prompt, tool whitelist sandbox, default skills, partitioned knowledge collections, and `maxSteps` execution ceiling.
+- **Dual-Directory Asset Discovery**: Scans both user-level global agents (`~/.cheese/agents/`) and workspace-local agents (`<workspace>/.agents/`), allowing plug-and-play project specialization without recompilation.
+- **Tool Whitelisting & Sandboxing**: Specialized agents operate within strict tool whitelists (retaining baseline read and retrieval tools); destructive operations (`bash`, `file_write`, `spawn_agent`) are blocked unless explicitly whitelisted.
+- **Multi-Collection Vector Knowledge Isolation**: `SqliteVectorStore` partitions embeddings and FTS5 documents by `collection_id`, providing isolated domain retrieval and MMR semantic reranking.
+- **Session Lifecycle Binding & Web Workbench Integration**:
+  - **Home Screen Domain Cards**: Visual selection grid for specialized agents on empty session state;
+  - **Toolbar Agent Capsule**: Rapid switching and one-click hot-reload (`↻ Reload`) via `🤖 Agent ▾`;
+  - **Session Header Profile Badge**: Click to inspect active system prompts, whitelisted tools, and execution safety ceilings;
+  - **Sidebar Session Avatars**: Session trees visibly distinct with bound agent emoji icons.
 
 ---
 
@@ -351,8 +477,11 @@ cheese-agent/
 │   │   ├── loop-detection.ts    # Infinite loop detector
 │   │   └── retry.ts             # Exponential backoff retry handler
 │   │
-│   ├── agents/                  # Ephemeral Sub-Agent orchestration
-│   │   ├── registry.ts          # State machine and concurrency quota manager
+│   ├── agents/                  # Domain Agent platform & Sub-Agent orchestration
+│   │   ├── manifest.ts          # agent.json declarative schema & types
+│   │   ├── loader.ts            # Dual-directory scanner & builtin general agent
+│   │   ├── domain-registry.ts   # Domain agent runtime registry & pool
+│   │   ├── registry.ts          # Sub-agent state machine and concurrency manager
 │   │   ├── spawn.ts             # Task dispatch and parallel fan-out runner
 │   │   └── types.ts             # Sub-agent state contracts and limits
 │   │
@@ -369,7 +498,7 @@ cheese-agent/
 │   │   └── hooks.ts             # AOP Pre/Post execution hooks
 │   │
 │   ├── rag/                     # Retrieval-Augmented Generation
-│   │   ├── sqlite-store.ts      # sqlite-vec vector storage driver
+│   │   ├── sqlite-store.ts      # sqlite-vec multi-collection storage driver
 │   │   ├── embedder.ts          # 1024-dim embedding client with cache
 │   │   ├── chunker.ts           # Semantic Markdown AST chunker
 │   │   ├── search.ts            # Hybrid vector search algorithm
@@ -380,6 +509,20 @@ cheese-agent/
 │   │   ├── parser.ts            # Schedule expression parser
 │   │   ├── store.ts             # Job state persistence
 │   │   └── types.ts             # Cron contracts and state types
+│   │
+│   ├── skills/                  # Skill SOP parsing & prompt assembly
+│   │   └── loader.ts            # Global & workspace loader, frontmatter parser
+│   │
+│   ├── runtime/                 # Process worker & execution orchestration
+│   │   ├── service.ts           # Session lifecycle, 409 concurrency guard, state
+│   │   ├── worker.ts            # Child worker process entry point
+│   │   ├── worker-client.ts     # IPC bridge & initial payload transmission
+│   │   ├── model-store.ts       # Model credentials, latency ping, model registry
+│   │   └── events.ts            # Execution events & credential redactor
+│   │
+│   ├── web/                     # Hono HTTP Web server & API gateway
+│   │   ├── server.ts            # REST endpoints, security middleware, SSE
+│   │   └── directory-picker.ts  # Native system directory picker bridge
 │   │
 │   ├── channels/                # External communication gateways
 │   │   ├── gateway.ts           # Multi-channel routing gateway
@@ -419,6 +562,15 @@ cheese-agent/
 │   └── usage/                   # Token telemetry & cost tracking
 │       └── tracker.ts           # Usage ledger & pricing matrix
 │
+├── web/                         # Web Workbench Frontend (HTML/CSS/JS)
+│   ├── index.html               # Kinpaku UI workbench markup & popovers
+│   ├── style.css                # Washi Light & Instrument Dark themes
+│   └── app.js                   # Lightweight reactive client & slash autocomplete
+├── .agents/                     # Specialized Domain Agent Packs
+│   ├── code-auditor/            # Code security audit specialist
+│   └── tech-writer/             # Technical architecture & docs specialist
+├── .skills/                     # Workspace Skill SOP repository
+│   └── code-review-skill/       # Code review SOP definition (SKILL.md)
 ├── cheese-agent.config.json     # Primary runtime configuration
 ├── tsconfig.json                # TypeScript compiler configuration
 └── package.json
@@ -476,6 +628,16 @@ The wizard guides you through selecting the primary model (Gemini 3.8/3.7, DashS
 ```
 
 ### 5. Running the Agent
+
+#### Option A: Local Web Workbench (Recommended ✨)
+```bash
+# Start local high-aesthetic Web Workbench
+pnpm run web
+# or npm run web
+```
+Navigate to `http://127.0.0.1:3210` to access the Kinpaku UI, multi-directory workspace switcher, real-time reasoning stream, model configuration hub, and skill popover manager.
+
+#### Option B: Terminal CLI
 ```bash
 # Watch mode for development
 pnpm run dev
@@ -486,12 +648,15 @@ pnpm start
 
 ---
 
-## 💬 Interactive CLI Commands
+## 💬 Interactive Commands & Skills
 
+### 1. Interactive CLI Commands
 Prefix commands with `/` in the interactive console:
 
 | Command | Description |
 | :--- | :--- |
+| `/<skill-name> [args]` | **Execute specific Skill SOP** (e.g., `/code-review src/main.ts` loads and injects domain procedure) |
+| `/skills` | List all discovered workspace and global skills available |
 | `/agents` | Inspect all sub-agent execution runs, active concurrency, and statuses |
 | `/role [owner\|collaborator\|guest]` | View or switch the active RBAC security role |
 | `/hooks` | Inspect registered Pre-Hook and Post-Hook security audit filters |
@@ -502,6 +667,41 @@ Prefix commands with `/` in the interactive console:
 | `/channels` | View external gateway connectivity (e.g., Feishu bot webhook) |
 | `/plugins` | Inspect loaded external plugins (e.g., Supabase) |
 | `exit` | Gracefully terminate all active background jobs, channels, and loops |
+
+### 2. Web Workbench Controls
+- **Domain Agent Selection**: Select specialized agents directly from the home screen grid, or toggle/hot-reload instantly via the `🤖 Agent ▾` capsule on the composer toolbar;
+- **Session Skills Popover**: Click the `✨ 技能 (N) ▾` badge in the composer toolbar to select active skills for the current session; SOP instructions are injected into system prompts across runs;
+- **Slash Autocomplete**: Type `/` in the task composer to trigger fuzzy autocomplete with keyboard navigation (`ArrowUp`/`ArrowDown`/`Tab`/`Enter`);
+- **Home Quick Prompts**: Discovered skills automatically populate as quick-start cards on the home screen.
+
+### 3. Customizing Domain Agent Packs
+#### Directory Convention
+Create `.agents/<agent-id>/` under the workspace root (workspace-local) or `~/.cheese/agents/<agent-id>/` under the user home directory (machine-global):
+```text
+.agents/code-auditor/
+├── agent.json       # Declarative manifest (identity, tool whitelist sandbox, skills, knowledge)
+└── PROMPT.md        # Domain-specific system prompt (merged into runtime system prompt)
+```
+
+#### Manifest Example (`agent.json`)
+```json
+{
+  "id": "code-auditor",
+  "name": "Code Auditor",
+  "description": "Specialized in security auditing, vulnerability discovery, and anti-pattern analysis with strict read-only tool sandbox",
+  "avatar": "🛡️",
+  "promptFile": "PROMPT.md",
+  "tools": ["file_read", "read_file", "search_files", "grep_search", "git_status", "git_diff", "git_log"],
+  "skills": ["code-review"],
+  "knowledge": ["security-audit"],
+  "maxSteps": 20
+}
+```
+
+#### Runtime Sandbox & Security Isolation
+- **Tool Whitelist Sandboxing**: Specialized agents are constrained to the exact toolset defined in `tools`. High-risk mutations and system commands are pruned unless explicitly whitelisted;
+- **Knowledge Collection Partitioning**: Specifying `knowledge` collections enables focused retrieval on the corresponding `collection_id` in SQLite-vec with MMR semantic reranking;
+- **Persistent Session Binding & Visual Inspection**: Sessions lock their bound agent, labeled with the agent's emoji avatar in the sidebar. Click the top-bar agent badge to inspect prompt instructions and tool permissions anytime.
 
 ---
 

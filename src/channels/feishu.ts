@@ -120,6 +120,7 @@ export class FeishuChannel implements ChannelDefinition {
    */
   async stop(): Promise<void> {
     if (this.httpServer) this.httpServer.close();
+    this.wsClient?.close({ force: true });
   }
 
   /**
@@ -157,6 +158,14 @@ export class FeishuChannel implements ChannelDefinition {
     const { serve } = await import('@hono/node-server');
 
     const app = new Hono();
+    app.use('*', async (context, next) => {
+      const url = new URL(context.req.url);
+      if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) return context.json({ error: '仅允许本机访问' }, 403);
+      const origin = context.req.header('origin');
+      if (origin && origin !== url.origin) return context.json({ error: '不允许跨站请求' }, 403);
+      if (context.req.method === 'POST' && !context.req.header('content-type')?.includes('application/json')) return context.json({ error: '需要 JSON 请求' }, 415);
+      await next();
+    });
 
     // 模拟 Webhook 接收端点：用于本地或 CI 环境直接通过 HTTP POST 模拟飞书消息传入
     app.post('/webhook/feishu', async (c) => {
@@ -263,7 +272,8 @@ export class FeishuChannel implements ChannelDefinition {
     app.get('/health', (c) => c.text('OK'));
 
     // 启动本地监听
-    this.httpServer = serve({ fetch: app.fetch, port: this.config.port });
+    this.httpServer = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: this.config.port });
+    await new Promise<void>((resolve, reject) => { this.httpServer.once('listening', resolve); this.httpServer.once('error', reject); });
     console.log(`    Dashboard: http://localhost:${this.config.port}`);
   }
 }

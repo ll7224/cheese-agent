@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { homedir } from 'node:os';
 
 /**
  * Skill（技能）的数据结构定义
@@ -15,6 +16,8 @@ export interface SkillDefinition {
   content: string;
   /** 该技能所在的物理目录绝对/相对路径 */
   dirPath: string;
+  /** 技能来源：工作区局部技能 或 全局通用技能 */
+  source?: 'workspace' | 'global';
 }
 
 /** 默认存放 Skills 的根目录名 */
@@ -34,20 +37,24 @@ const SKILL_FILE = 'SKILL.md';
 export class SkillLoader {
   /** 扫描的基础工作目录 */
   private readonly baseDir: string;
+  /** 全局技能扫描目录，默认 ~/.cheese/skills */
+  private readonly globalSkillsDir: string;
   /** 内存中缓存的已解析技能映射（Key 为 skill 名称） */
   private skills = new Map<string, SkillDefinition>();
 
-  constructor(baseDir = '.') {
+  constructor(baseDir = '.', globalSkillsDir?: string) {
     this.baseDir = baseDir;
+    this.globalSkillsDir = globalSkillsDir ?? path.join(homedir(), '.cheese', 'skills');
   }
 
-  /** 计算 .skills 根目录路径 */
+  /** 计算工作区 .skills 根目录路径 */
   private get skillsDir(): string {
     return path.join(this.baseDir, SKILLS_DIR);
   }
 
   /**
-   * 遍历扫描 `.skills/` 目录并解析所有合法的技能定义文件。
+   * 遍历扫描全局目录 (`~/.cheese/skills/`) 与工作区目录 (`.skills/`)，解析所有合法的技能定义文件。
+   * 若全局和工作区存在同名技能，工作区局部技能优先覆盖全局技能。
    *
    * 目录结构约定：
    * .skills/
@@ -56,29 +63,47 @@ export class SkillLoader {
    */
   load(): SkillDefinition[] {
     this.skills.clear();
-    if (!fs.existsSync(this.skillsDir)) return [];
 
-    const entries = fs.readdirSync(this.skillsDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const skillFile = path.join(this.skillsDir, entry.name, SKILL_FILE);
-      if (!fs.existsSync(skillFile)) continue;
+    // 1. 先扫描全局技能目录 (~/.cheese/skills/)
+    this.scanDirectory(this.globalSkillsDir, 'global');
 
-      const raw = fs.readFileSync(skillFile, 'utf-8');
-      const parsed = this.parseFrontmatter(raw);
-      if (!parsed) continue;
-
-      const skill: SkillDefinition = {
-        name: entry.name,
-        description: parsed.description,
-        whenToUse: parsed.whenToUse,
-        content: parsed.content,
-        dirPath: path.join(this.skillsDir, entry.name),
-      };
-      this.skills.set(skill.name, skill);
-    }
+    // 2. 后扫描工作区目录 (.skills/)，同名优先覆盖
+    this.scanDirectory(this.skillsDir, 'workspace');
 
     return this.list();
+  }
+
+  /**
+   * 扫描指定目录下的技能子文件夹
+   */
+  private scanDirectory(dir: string, source: 'workspace' | 'global') {
+    if (!fs.existsSync(dir)) return;
+
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const skillFile = path.join(dir, entry.name, SKILL_FILE);
+        if (!fs.existsSync(skillFile)) continue;
+
+        const raw = fs.readFileSync(skillFile, 'utf-8');
+        const parsed = this.parseFrontmatter(raw);
+        if (!parsed) continue;
+
+        const skillName = (parsed.name && parsed.name.trim()) || entry.name;
+        const skill: SkillDefinition = {
+          name: skillName,
+          description: parsed.description,
+          whenToUse: parsed.whenToUse,
+          content: parsed.content,
+          dirPath: path.join(dir, entry.name),
+          source,
+        };
+        this.skills.set(skill.name, skill);
+      }
+    } catch {
+      // 容错降级：目录不可读时不中断服务
+    }
   }
 
   /**
@@ -140,7 +165,7 @@ export class SkillLoader {
    * 简单的轻量级 YAML Frontmatter 解析器。
    * 负责提取文件头部的 `---` 区域内的元数据（description, when_to_use 等）并分离 Markdown 正文。
    */
-  private parseFrontmatter(raw: string): { description: string; whenToUse?: string; content: string } | null {
+  private parseFrontmatter(raw: string): { name?: string; description: string; whenToUse?: string; content: string } | null {
     const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
     if (!match) return { description: '', content: raw };
 
@@ -159,6 +184,7 @@ export class SkillLoader {
     }
 
     return {
+      name: meta.name || undefined,
       description: meta.description || '',
       whenToUse: meta.when_to_use || undefined,
       content: match[2].trim(),

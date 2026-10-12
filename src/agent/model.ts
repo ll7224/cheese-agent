@@ -56,6 +56,7 @@ export function getModel(customConfig?: Partial<ModelConfig> | CheeseAgentConfig
     process.env.MODEL_PROVIDER ||
     'openai'
   ).toLowerCase();
+  if (provider === 'mock') return createMockModel();
 
   // ── 3. 级联判定 Model Name ─────────────────────────────────────────
   // 优先级：配置中的 name > 环境变量 MODEL_NAME > 针对 provider 的默认值

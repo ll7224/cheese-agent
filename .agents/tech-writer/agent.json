@@ -1,0 +1,19 @@
+{
+  "id": "tech-writer",
+  "name": "技术文档架构师",
+  "description": "专精系统架构设计说明书、API 接口文档、SDK 指南与中英双语技术内容撰写",
+  "avatar": "✍️",
+  "promptFile": "PROMPT.md",
+  "tools": [
+    "file_read",
+    "read_file",
+    "file_write",
+    "write_file",
+    "search_files"
+  ],
+  "skills": [],
+  "knowledge": [
+    "doc-standards"
+  ],
+  "maxSteps": 25
+}
