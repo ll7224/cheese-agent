@@ -380,15 +380,13 @@ test('Scenario 4: 范围隔离与 Worker IPC 往返（同路径项目隔离、�
     /未知知识库 ID/
   );
 
-  // 7. 图谱请求在 P2 启用前返回明确不可用错误，不回退全库
-  await assert.rejects(
-    async () =>
-      service.dispatch(ctxP1, {
-        op: 'graph',
-        input: { entityId: 'E1', hops: 1 },
-      }),
-    /知识图谱功能尚未启用/
-  );
+  // 7. 图谱请求遵守范围隔离，未知实体返回空图谱，不回退全库
+  const graphRes = (await service.dispatch(ctxP1, {
+    op: 'graph',
+    input: { entityId: 'E1', hops: 1 },
+  })) as any;
+  assert.equal(graphRes.nodes.length, 0, '未知实体或无权限时不回退全库');
+  assert.equal(graphRes.edges.length, 0);
 
   // 8. 复用现有 worker fixture 验证真实 worker IPC 往返回到主服务
   const mockServer = createServer(async (request, response) => {
@@ -493,4 +491,191 @@ test('Scenario 4: 范围隔离与 Worker IPC 往返（同路径项目隔离、�
   const toolResultEvent = events.find((e) => e.type === 'tool-result' && e.name === 'rag_search');
   assert.ok(toolResultEvent, 'Worker must execute rag_search tool through IPC');
   assert.match(String(toolResultEvent?.output), /Alpha Architecture Document/);
+});
+
+test('Scenario 5: TS/JS 代码结构索引与局部图谱合并与隔离', async (t) => {
+  const env = createKnowledgeTestEnv(t);
+  const store = env.store;
+  const service = new KnowledgeService({ dataDir: env.tempDir, store });
+
+  const p1Lib = store.createLibrary({
+    id: 'project:ws-p1',
+    name: 'Project P1 Lib',
+    description: 'P1 Workspace Library',
+    scope: 'project',
+    workspaceId: 'ws-p1',
+    role: 'project',
+  });
+
+  const p2Lib = store.createLibrary({
+    id: 'project:ws-p2',
+    name: 'Project P2 Lib',
+    description: 'P2 Workspace Library',
+    scope: 'project',
+    workspaceId: 'ws-p2',
+    role: 'project',
+  });
+
+  const ctxP1: KnowledgeContext = {
+    workspaceId: 'ws-p1',
+    workspacePath: env.tempDir,
+    agentId: 'general',
+    role: 'owner',
+  };
+
+  const ctxP2: KnowledgeContext = {
+    workspaceId: 'ws-p2',
+    workspacePath: env.tempDir,
+    agentId: 'general',
+    role: 'owner',
+  };
+
+  // 1. 在 P1 中导入四个代码文件
+  const fileAContent = `import { helper } from './shared.ts';
+export function calculate(): number {
+  return helper() + 1;
+}`;
+
+  const fileBContent = `export function calculate(): number {
+  return 100;
+}`;
+
+  const sharedContent = `export function helper(): number {
+  return 42;
+}`;
+
+  const fileCContent = `import { helper } from './shared.ts';
+export function runner(): number {
+  return helper() * 2;
+}`;
+
+  await service.dispatch(ctxP1, {
+    op: 'ingest',
+    input: { content: fileAContent, name: 'fileA.ts', libraryId: p1Lib.id },
+  });
+
+  await service.dispatch(ctxP1, {
+    op: 'ingest',
+    input: { content: fileBContent, name: 'fileB.ts', libraryId: p1Lib.id },
+  });
+
+  await service.dispatch(ctxP1, {
+    op: 'ingest',
+    input: { content: sharedContent, name: 'shared.ts', libraryId: p1Lib.id },
+  });
+
+  await service.dispatch(ctxP1, {
+    op: 'ingest',
+    input: { content: fileCContent, name: 'fileC.ts', libraryId: p1Lib.id },
+  });
+
+  // 2. 验证：两个文件同名函数不合并 (fileA.ts 的 calculate 与 fileB.ts 的 calculate 是独立实体)
+  const calcEntities = store.db.prepare(`
+    SELECT * FROM entities WHERE name = 'calculate' AND workspace_id = 'ws-p1'
+  `).all() as any[];
+  assert.equal(calcEntities.length, 2, '两个文件的同名函数不合并');
+  assert.notEqual(calcEntities[0].id, calcEntities[1].id, '不同文件的实体 ID 必须区分');
+  assert.notEqual(calcEntities[0].path, calcEntities[1].path);
+
+  // 3. 验证：import 路径与行号准确
+  const importEdges = store.db.prepare(`
+    SELECT * FROM edges WHERE source_id LIKE '%fileA.ts%' AND kind = 'imports'
+  `).all() as any[];
+  assert.ok(importEdges.length > 0, 'fileA.ts 必须存在 imports 边');
+  const edgeEvidences = store.db.prepare(`
+    SELECT * FROM edge_evidence WHERE edge_id = ?
+  `).all(importEdges[0].id) as any[];
+  assert.ok(edgeEvidences.length > 0, '边必须具备版本证据');
+  assert.equal(edgeEvidences[0].start_line, 1, 'import 语句起始行号准确为 1');
+  assert.equal(edgeEvidences[0].end_line, 1, 'import 语句结束行号准确为 1');
+
+  // 插入候选语义边 (模型推断候选)
+  const candEdgeId = 'cand-edge-semantic-1';
+  store.db.prepare(`
+    INSERT INTO edges (id, source_id, target_id, kind, status, library_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(candEdgeId, calcEntities[0].id, calcEntities[1].id, 'explains', 'candidate', p1Lib.id);
+
+  // 4. 验证：修改依赖后旧边退出，共享目标仍存在；候选语义边保留状态
+  const updatedFileAContent = `import { other } from './other.ts';
+export function calculate(): number {
+  return other();
+}`;
+  await service.dispatch(ctxP1, {
+    op: 'ingest',
+    input: { content: updatedFileAContent, name: 'fileA.ts', libraryId: p1Lib.id },
+  });
+
+  // 检查旧的 fileA -> shared 边已退出
+  const oldImportEdge = store.db.prepare(`
+    SELECT * FROM edges WHERE source_id LIKE '%fileA.ts%' AND target_id LIKE '%shared.ts%'
+  `).all();
+  assert.equal(oldImportEdge.length, 0, '修改依赖后旧边必须退出图谱');
+
+  // 共享目标 shared.ts 及其实体仍然存在
+  const sharedEntities = store.db.prepare(`
+    SELECT * FROM entities WHERE path = 'shared.ts'
+  `).all();
+  assert.ok(sharedEntities.length > 0, '共享目标 shared.ts 实体仍应保留');
+
+  // fileC.ts -> shared.ts 的边仍然存在
+  const cToSharedEdges = store.db.prepare(`
+    SELECT * FROM edges WHERE source_id LIKE '%fileC.ts%' AND target_id LIKE '%shared.ts%'
+  `).all();
+  assert.ok(cToSharedEdges.length > 0, 'fileC.ts 对 shared.ts 的依赖边仍保留');
+
+  // 候选语义边保留候选状态
+  const candRow = store.db.prepare(`SELECT * FROM edges WHERE id = ?`).get(candEdgeId) as any;
+  assert.ok(candRow, '候选语义边必须保留');
+  assert.equal(candRow.status, 'candidate', '候选语义边必须保留 candidate 状态');
+
+  // 5. 验证：超限显示 truncated (hops=1 上限 60 节点)
+  const hubNodeId = 'ws-p1:hub.ts:::file:hub.ts';
+  store.db.prepare(`
+    INSERT INTO entities (id, workspace_id, path, kind, name, library_id, revision_id, start_offset, end_offset, start_line, end_line)
+    VALUES (?, 'ws-p1', 'hub.ts', 'file', 'hub.ts', 'project:ws-p1', 'rev-hub', 0, 100, 1, 10)
+  `).run(hubNodeId);
+
+  // 构造 65 个相连实体和边
+  for (let i = 0; i < 65; i++) {
+    const spokeId = `ws-p1:spoke${i}.ts:::file:spoke${i}.ts`;
+    store.db.prepare(`
+      INSERT INTO entities (id, workspace_id, path, kind, name, library_id, revision_id, start_offset, end_offset, start_line, end_line)
+      VALUES (?, 'ws-p1', 'spoke${i}.ts', 'file', 'spoke${i}.ts', 'project:ws-p1', 'rev-hub', 0, 10, 1, 1)
+    `).run(spokeId);
+    store.db.prepare(`
+      INSERT INTO edges (id, source_id, target_id, kind, status, library_id)
+      VALUES (?, ?, ?, 'imports', 'effective', 'project:ws-p1')
+    `).run(`edge-hub-${i}`, hubNodeId, spokeId);
+  }
+
+  const hubView = service.graph(ctxP1, hubNodeId, 1);
+  assert.equal(hubView.truncated, true, '超过 60 个节点时 truncated 必须为 true');
+  assert.equal(hubView.nodes.length, 60, '默认 1 跳最多返回 60 个节点');
+
+  // 6. 验证：P1 图查询不能访问 P2 实体和证据
+  const p2SecretContent = `export function secretAlgorithm(): number {
+  return 99999;
+}`;
+  await service.dispatch(ctxP2, {
+    op: 'ingest',
+    input: { content: p2SecretContent, name: 'secret.ts', libraryId: p2Lib.id },
+  });
+
+  const p2SecretEntity = store.db.prepare(`
+    SELECT * FROM entities WHERE name = 'secretAlgorithm' AND workspace_id = 'ws-p2'
+  `).get() as any;
+  assert.ok(p2SecretEntity, 'P2 实体必须成功建立');
+
+  // P1 试图查询 P2 的实体 ID
+  const p1QueryP2 = service.graph(ctxP1, p2SecretEntity.id, 1);
+  assert.equal(p1QueryP2.nodes.length, 0, 'P1 图查询绝对无法访问 P2 的实体');
+  assert.equal(p1QueryP2.edges.length, 0, 'P1 图查询绝对无法访问 P2 的边');
+
+  // P1 总览图谱中绝对不包含 P2 的实体
+  const p1Overview = service.graph(ctxP1);
+  assert.ok(
+    !p1Overview.nodes.some((n) => n.name === 'secretAlgorithm' || n.path === 'secret.ts'),
+    'P1 总览中绝对不能泄露 P2 的代码实体'
+  );
 });

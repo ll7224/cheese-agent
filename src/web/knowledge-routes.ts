@@ -448,5 +448,44 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     }
   });
 
+  // 12. GET /api/v1/workspaces/:id/knowledge/graph?entityId=&hops=
+  routes.get('/api/v1/workspaces/:id/knowledge/graph', (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const entityId = context.req.query('entityId');
+    const hopsParam = context.req.query('hops');
+    const hops: 1 | 2 = hopsParam === '2' ? 2 : 1;
+    const result = runtime.knowledgeService.graph(ctx, entityId, hops);
+    return context.json(result);
+  });
+
+  // 13. GET /api/v1/workspaces/:id/knowledge/graph/evidence?nodeId=
+  routes.get('/api/v1/workspaces/:id/knowledge/graph/evidence', (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const nodeId = context.req.query('nodeId');
+    if (!nodeId) {
+      return context.json({ error: 'nodeId 必填' }, 400);
+    }
+    const ent = runtime.knowledgeService.store.getEntity(nodeId);
+    if (!ent) {
+      throw new RuntimeError('实体不存在', 404);
+    }
+    const allLibs = runtime.knowledgeService.store.listLibraries();
+    const accessibleIds = resolveLibraries(allLibs, ctx);
+    if (!accessibleIds.includes(ent.libraryId)) {
+      throw new RuntimeError('无权访问此实体', 404);
+    }
+    const rev = runtime.knowledgeService.store.readRevision(ent.revisionId);
+    if (!rev) {
+      throw new RuntimeError('版本原文不存在', 404);
+    }
+    const lines = rev.content.split('\n');
+    const snippetLines = lines.slice(Math.max(0, ent.startLine - 1), ent.endLine);
+    return context.json({
+      entity: ent,
+      snippet: snippetLines.join('\n'),
+      fullContent: rev.content,
+    });
+  });
+
   return routes;
 }

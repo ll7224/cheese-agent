@@ -8,6 +8,7 @@ import {
   getCitationView,
   executeIngest,
 } from './retriever.js';
+import { queryGraph } from './graph.js';
 import type {
   KnowledgeContext,
   SourceProposal,
@@ -16,6 +17,7 @@ import type {
   SearchResponse,
   CitationView,
   KnowledgeRequest,
+  GraphView,
 } from './types.js';
 
 export interface KnowledgeServiceOptions {
@@ -174,6 +176,13 @@ export class KnowledgeService {
   }
 
   /**
+   * 查询代码结构与局部实体图谱
+   */
+  graph(ctx: KnowledgeContext, entityId?: string, hops: 1 | 2 = 1): GraphView {
+    return queryGraph(this.store, ctx, entityId, hops);
+  }
+
+  /**
    * 统一分发 KnowledgeRequest
    */
   async dispatch(ctx: KnowledgeContext, request: KnowledgeRequest): Promise<unknown> {
@@ -184,7 +193,7 @@ export class KnowledgeService {
       return this.citation(ctx, request.input.citationId);
     }
     if (request.op === 'graph') {
-      throw new Error('知识图谱功能尚未启用 (P2 阶段提供)');
+      return this.graph(ctx, request.input.entityId, request.input.hops);
     }
     if (request.op === 'ingest') {
       const embedder = this.options.embedderForWorkspace

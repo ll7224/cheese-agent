@@ -11,6 +11,7 @@ import type {
 } from './types.js';
 import { resolveLibraries, resolveIndexKeys, getAgentLibraryIds } from './libraries.js';
 import { chunkWithSpans } from './chunks.js';
+import { indexCode } from './code-indexer.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -281,6 +282,12 @@ export async function executeIngest(
   const hash = crypto.createHash('sha256').update(content).digest('hex');
   const existingDoc = store.getDocument(sourceId, sourceKey);
 
+  let codeIndex: any = undefined;
+  const ext = path.extname(sourceKey).toLowerCase();
+  if (['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'].includes(ext)) {
+    codeIndex = indexCode(ctx.workspaceId, sourceKey, content, ctx.workspacePath);
+  }
+
   return store.publishRevision({
     sourceId: source.id,
     sourceKey,
@@ -291,7 +298,8 @@ export async function executeIngest(
       text: c.text,
       span: c.span,
       embedding: chunkEmbeddings ? chunkEmbeddings[idx] : undefined,
-      evidenceKind: 'document',
+      evidenceKind: codeIndex ? 'code' : 'document',
     })),
+    codeIndex,
   });
 }

@@ -4,6 +4,7 @@
 
 import { buildKnowledgeShell } from './views.js';
 import { viewCitation } from './citations.js';
+import { GraphController } from './graph.js';
 
 function escapeHtml(str) {
   return String(str || '').replace(/[&<>"']/g, (m) => ({
@@ -75,6 +76,8 @@ export class KnowledgeController {
           this.loadDiscoveries();
         } else if (btn.dataset.tab === 'documents') {
           this.loadDocuments();
+        } else if (btn.dataset.tab === 'graph') {
+          this.loadGraph();
         }
       });
     });
@@ -480,6 +483,16 @@ export class KnowledgeController {
       });
     } catch (err) {
       hitsList.innerHTML = `<div class="table-error">检索出错: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  loadGraph() {
+    const root = this.container.querySelector('#kn-graph-root');
+    if (!root) return;
+    if (!this.graphController) {
+      this.graphController = new GraphController(root, this.workspaceId);
+    } else {
+      this.graphController.loadGraph();
     }
   }
 

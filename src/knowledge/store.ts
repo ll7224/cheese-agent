@@ -328,6 +328,13 @@ export class KnowledgeStore {
         UPDATE documents SET active_revision_id = ?, updated_at = ? WHERE id = ?
       `).run(revisionId, now, documentId);
 
+      // 6.1 代码结构索引（共用同一事务发布与更新）
+      if (input.codeIndex) {
+        const libRow = this.db.prepare(`SELECT workspace_id FROM libraries WHERE id = ?`).get(source.libraryId) as any;
+        const workspaceId = libRow?.workspace_id || '';
+        this.applyCodeIndexTx(source.libraryId, workspaceId, revisionId, doc.activeRevisionId, input.codeIndex);
+      }
+
       // 7. 递增 generation
       this.db.prepare(`
         UPDATE generation SET version = version + 1 WHERE id = 1
@@ -340,10 +347,113 @@ export class KnowledgeStore {
   }
 
   /**
+   * 在当前事务内应用代码实体与关联边，并清理旧 revision 的证据归属
+   */
+  private applyCodeIndexTx(
+    libraryId: string,
+    workspaceId: string,
+    revisionId: string,
+    oldRevisionId: string | null,
+    codeIndex: NonNullable<RevisionDraft['codeIndex']>
+  ): void {
+    if (oldRevisionId) {
+      this.db.prepare(`DELETE FROM edge_evidence WHERE revision_id = ?`).run(oldRevisionId);
+      this.db.prepare(`DELETE FROM entities WHERE revision_id = ?`).run(oldRevisionId);
+      this.db.prepare(`
+        DELETE FROM edges
+        WHERE status = 'effective'
+          AND id NOT IN (SELECT DISTINCT edge_id FROM edge_evidence)
+      `).run();
+    }
+
+    const insertEntity = this.db.prepare(`
+      INSERT INTO entities (
+        id, workspace_id, path, container, kind, name,
+        library_id, revision_id, start_offset, end_offset, start_line, end_line
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        workspace_id = excluded.workspace_id,
+        path = excluded.path,
+        container = excluded.container,
+        kind = excluded.kind,
+        name = excluded.name,
+        library_id = excluded.library_id,
+        revision_id = excluded.revision_id,
+        start_offset = excluded.start_offset,
+        end_offset = excluded.end_offset,
+        start_line = excluded.start_line,
+        end_line = excluded.end_line
+    `);
+
+    for (const ent of codeIndex.entities) {
+      insertEntity.run(
+        ent.id,
+        ent.workspaceId || workspaceId,
+        ent.path,
+        ent.container || null,
+        ent.kind,
+        ent.name,
+        libraryId,
+        revisionId,
+        ent.span.startOffset,
+        ent.span.endOffset,
+        ent.span.startLine,
+        ent.span.endLine
+      );
+    }
+
+    const checkEdge = this.db.prepare(`SELECT status FROM edges WHERE id = ?`);
+    const insertEdge = this.db.prepare(`
+      INSERT INTO edges (id, source_id, target_id, kind, status, library_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        source_id = excluded.source_id,
+        target_id = excluded.target_id,
+        kind = excluded.kind,
+        library_id = excluded.library_id
+    `);
+
+    const insertEvidence = this.db.prepare(`
+      INSERT INTO edge_evidence (id, edge_id, revision_id, start_offset, end_offset, start_line, end_line)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const edge of codeIndex.edges) {
+      const existing = checkEdge.get(edge.id) as { status: string } | undefined;
+      const status = existing ? existing.status : 'effective';
+      insertEdge.run(edge.id, edge.sourceEntityId, edge.targetEntityId, edge.kind, status, libraryId);
+
+      const span = edge.span || { startOffset: 0, endOffset: 0, startLine: 1, endLine: 1 };
+      const evidenceId = `evi-${revisionId}-${Math.random().toString(36).slice(2, 8)}`;
+      insertEvidence.run(
+        evidenceId,
+        edge.id,
+        revisionId,
+        span.startOffset,
+        span.endOffset,
+        span.startLine,
+        span.endLine
+      );
+    }
+  }
+
+  /**
    * 删除文档并将其片段移出检索索引（保留历史版本记录）
    */
   deleteDocument(documentId: string): void {
     const tx = this.db.transaction(() => {
+      const docRow = this.db.prepare(`SELECT active_revision_id FROM documents WHERE id = ?`).get(documentId) as any;
+      if (docRow?.active_revision_id) {
+        this.db.prepare(`DELETE FROM edge_evidence WHERE revision_id = ?`).run(docRow.active_revision_id);
+        this.db.prepare(`DELETE FROM entities WHERE revision_id = ?`).run(docRow.active_revision_id);
+        this.db.prepare(`
+          DELETE FROM edges
+          WHERE status = 'effective'
+            AND id NOT IN (SELECT DISTINCT edge_id FROM edge_evidence)
+        `).run();
+      }
+
       const prevChunkRows = this.db.prepare(`
         SELECT chunk_id FROM chunk_refs WHERE document_id = ?
       `).all(documentId) as Array<{ chunk_id: string }>;
@@ -511,6 +621,89 @@ export class KnowledgeStore {
       libraryId: r.library_id,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
+    }));
+  }
+
+  /**
+   * 查询指定实体
+   */
+  getEntity(id: string): {
+    id: string;
+    workspaceId: string;
+    path: string;
+    container?: string;
+    kind: string;
+    name: string;
+    libraryId: string;
+    revisionId: string;
+    startLine: number;
+    endLine: number;
+  } | null {
+    const row = this.db.prepare(`SELECT * FROM entities WHERE id = ?`).get(id) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      workspaceId: row.workspace_id,
+      path: row.path,
+      container: row.container || undefined,
+      kind: row.kind,
+      name: row.name,
+      libraryId: row.library_id,
+      revisionId: row.revision_id,
+      startLine: row.start_line,
+      endLine: row.end_line,
+    };
+  }
+
+  /**
+   * 条件查询实体列表
+   */
+  listEntities(options: {
+    libraryIds?: string[];
+    workspaceId?: string;
+    limit?: number;
+  } = {}): Array<{
+    id: string;
+    workspaceId: string;
+    path: string;
+    container?: string;
+    kind: string;
+    name: string;
+    libraryId: string;
+    revisionId: string;
+    startLine: number;
+    endLine: number;
+  }> {
+    const limit = options.limit || 60;
+    const where: string[] = [];
+    const params: any[] = [];
+    if (options.libraryIds && options.libraryIds.length > 0) {
+      where.push(`library_id IN (${options.libraryIds.map(() => '?').join(',')})`);
+      params.push(...options.libraryIds);
+    }
+    if (options.workspaceId) {
+      where.push(`workspace_id = ?`);
+      params.push(options.workspaceId);
+    }
+    let sql = `SELECT * FROM entities`;
+    if (where.length > 0) {
+      sql += ` WHERE ` + where.join(' AND ');
+    }
+    sql += ` ORDER BY path ASC, start_line ASC LIMIT ?`;
+    params.push(limit);
+
+    const rows = this.db.prepare(sql).all(...params) as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      workspaceId: r.workspace_id,
+      path: r.path,
+      container: r.container || undefined,
+      kind: r.kind,
+      name: r.name,
+      libraryId: r.library_id,
+      revisionId: r.revision_id,
+      startLine: r.start_line,
+      endLine: r.end_line,
     }));
   }
 

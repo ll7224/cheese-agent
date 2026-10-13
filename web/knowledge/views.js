@@ -63,6 +63,7 @@ export function buildKnowledgeShell() {
       <button class="kn-tab-btn active" data-tab="documents" type="button">📄 资料列表</button>
       <button class="kn-tab-btn" data-tab="sources" type="button">🌐 来源清单与同步</button>
       <button class="kn-tab-btn" data-tab="bindings" type="button">🤖 智能体绑定</button>
+      <button class="kn-tab-btn" data-tab="graph" type="button">🕸 代码图谱</button>
     </div>
 
     <div class="knowledge-tab-content">
@@ -144,6 +145,11 @@ export function buildKnowledgeShell() {
           <span class="toolbar-stat">配置各智能体 (Agent) 默认可检索访问的知识库</span>
         </div>
         <div id="kn-bindings-container" class="bindings-grid"></div>
+      </section>
+
+      <!-- 代码图谱 Tab -->
+      <section id="kn-tab-graph" class="kn-tab-pane" hidden>
+        <div id="kn-graph-root"></div>
       </section>
     </div>
 

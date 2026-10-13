@@ -123,6 +123,7 @@ export interface RevisionDraft {
   commit?: string;
   expectedPreviousRevisionId: string | null;
   chunks: ChunkRefDraft[];
+  codeIndex?: CodeIndex;
 }
 
 export interface EntityDraft {
@@ -154,6 +155,10 @@ export interface GraphNode {
   kind: string;
   path: string;
   libraryId?: string;
+  container?: string;
+  revisionId?: string;
+  startLine?: number;
+  endLine?: number;
 }
 
 export interface GraphEdge {

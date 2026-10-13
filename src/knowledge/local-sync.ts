@@ -4,9 +4,10 @@ import crypto from 'node:crypto';
 import chokidar, { type FSWatcher } from 'chokidar';
 import fg from 'fast-glob';
 import type { KnowledgeStore } from './store.js';
-import type { Source, RevisionDraft } from './types.js';
+import type { Source, RevisionDraft, CodeIndex } from './types.js';
 import { chunkWithSpans } from './chunks.js';
 import { isIgnoredKnowledgePath, IGNORE_PATTERNS, MAX_FILE_SIZE_BYTES } from './sources.js';
+import { indexCode } from './code-indexer.js';
 
 export { isIgnoredKnowledgePath };
 
@@ -265,6 +266,15 @@ export class LocalSyncManager {
       chunkEmbeddings = await this.embedder(rawChunks.map((c) => c.text));
     }
 
+    // 代码结构索引（TS/JS 代码提取实体与引用边）
+    let codeIndex: CodeIndex | undefined;
+    const ext = path.extname(relKey).toLowerCase();
+    if (['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'].includes(ext)) {
+      const lib = this.store.getLibrary(source.libraryId);
+      const wsId = lib?.workspaceId || '';
+      codeIndex = indexCode(wsId, relKey, content, realWorkspace);
+    }
+
     const draft: RevisionDraft = {
       sourceId,
       sourceKey: relKey,
@@ -275,8 +285,9 @@ export class LocalSyncManager {
         text: c.text,
         span: c.span,
         embedding: chunkEmbeddings ? chunkEmbeddings[idx] : undefined,
-        evidenceKind: 'document',
+        evidenceKind: codeIndex ? 'code' : 'document',
       })),
+      codeIndex,
     };
 
     this.store.publishRevision(draft);

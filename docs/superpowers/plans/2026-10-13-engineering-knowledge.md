@@ -320,7 +320,7 @@ KnowledgeService.graph(ctx: KnowledgeContext, entityId: string, hops: 1 | 2): Gr
 
 CodeIndex 为 {entities: EntityDraft[], edges: EdgeDraft[]}，每个草稿带 SourceSpan，发布时绑定 revisionId。GraphView 为 {generation,nodes,edges,truncated}；EntityDraft 的 key 包含 workspaceId+相对路径+容器+kind+名称。
 
-- [ ] 使用安装的 TypeScript 6.0.3 API，仅语法解析 TS/TSX/JS/JSX；提取函数、类、接口、类型、命名箭头函数、导出以及静态 import/export-from。动态非字面量引用不猜测。
+- [x] 使用安装的 TypeScript 6.0.3 API，仅语法解析 TS/TSX/JS/JSX；提取函数、类、接口、类型、命名箭头函数、导出以及静态 import/export-from。动态非字面量引用不猜测。
 
 ```ts
 const sf = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true, scriptKind);
@@ -337,11 +337,11 @@ visit(sf);
 
 recordSupportedDeclaration 仅处理上面列出的节点类型；scriptKind 按扩展名选择 TS/TSX/JS/JSX。按 tsconfig 的 paths/baseUrl 和 ts.resolveModuleName 解析项目导入；包导入指向 package 节点，不索引 node_modules。不创建完整 Program/type checker。
 
-- [ ] schema 增加 entities/edges/edge_evidence；import/export/contains 关系来自解析，可直接 effective。自然语言 explains/constrains/contradicts 是模型候选，不能当成解析事实。
-- [ ] 代码索引与文档发布共用事务；删除旧 revision 的证据归属，仍有当前证据的共享实体/边保留，无当前证据的关系退出当前图。首次启用结构索引对已存在 TS/JS 文档重建一次，后续按 hash 跳过。
-- [ ] GET /api/v1/workspaces/:id/knowledge/graph?entityId=&hops= 默认 1 跳/60 节点，上限 2 跳/120 节点，所有节点、边、证据遵守 scope；超限返回 truncated。
-- [ ] 用原生 SVG 和确定性环形/分层布局绘制局部图谱，支持点击、拖动和缩放，不引入力导向模拟。选中实体打开证据；解释按钮填入当前项目会话草稿，不自动运行。
-- [ ] 加第 5 个合并场景：两个文件同名函数不合并，import 路径/行号准确，修改依赖后旧边退出，共享目标仍存在；候选语义边保留状态，超限显示 truncated，并验证 P1 图查询不能访问 P2 实体和证据。
+- [x] schema 增加 entities/edges/edge_evidence；import/export/contains 关系来自解析，可直接 effective。自然语言 explains/constrains/contradicts 是模型候选，不能当成解析事实。
+- [x] 代码索引与文档发布共用事务；删除旧 revision 的证据归属，仍有当前证据的共享实体/边保留，无当前证据的关系退出当前图。首次启用结构索引对已存在 TS/JS 文档重建一次，后续按 hash 跳过。
+- [x] GET /api/v1/workspaces/:id/knowledge/graph?entityId=&hops= 默认 1 跳/60 节点，上限 2 跳/120 节点，所有节点、边、证据遵守 scope；超限返回 truncated。
+- [x] 用原生 SVG 和确定性环形/分层布局绘制局部图谱，支持点击、拖动和缩放，不引入力导向模拟。选中实体打开证据；解释按钮填入当前项目会话草稿，不自动运行。
+- [x] 加第 5 个合并场景：两个文件同名函数不合并，import 路径/行号准确，修改依赖后旧边退出，共享目标仍存在；候选语义边保留状态，超限显示 truncated，并验证 P1 图查询不能访问 P2 实体和证据。
 
 **交付:** 用户从模块出发浏览真实代码关系及引用，结构解析失败的文件仍可文本检索并显示错误。
 
