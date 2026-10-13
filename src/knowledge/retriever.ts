@@ -28,6 +28,393 @@ export function emptySearchResponse(generation: number = 1): SearchResponse {
 }
 
 /**
+ * 在受控范围内执行混合向量/全文检索，返回种子候选
+ */
+export function searchPreparedWithinScope(
+  store: KnowledgeStore,
+  request: SearchRequest,
+  queryVector: number[] | undefined,
+  allowedLibraryIds: string[]
+): KnowledgeHit[] {
+  const statuses: KnowledgeStatus[] =
+    request.mode === 'experience'
+      ? ['effective', 'candidate']
+      : ['effective'];
+
+  const collectionIds = resolveIndexKeys(allowedLibraryIds, statuses);
+  if (collectionIds.length === 0) return [];
+
+  const rawResults = store.vectorStore.searchPrepared(
+    request.query,
+    queryVector,
+    request.topK || 5,
+    collectionIds
+  );
+
+  const hits: KnowledgeHit[] = [];
+
+  const stmt = store.db.prepare(`
+    SELECT
+      r.id AS ref_id,
+      r.document_id,
+      r.revision_id,
+      r.start_offset,
+      r.end_offset,
+      r.start_line,
+      r.end_line,
+      r.evidence_kind,
+      d.source_id,
+      d.source_key,
+      d.active_revision_id,
+      d.status AS doc_status,
+      s.library_id,
+      rev.hash,
+      rev.commit_hash
+    FROM chunk_refs r
+    JOIN documents d ON d.id = r.document_id
+    JOIN sources s ON s.id = d.source_id
+    JOIN revisions rev ON rev.id = r.revision_id
+    WHERE r.chunk_id = ?
+  `);
+
+  const itemStmt = store.db.prepare(`
+    SELECT * FROM knowledge_items
+    WHERE id = ?
+       OR id = ?
+       OR id = REPLACE(?, 'item-chunk-', '')
+       OR id = REPLACE(?, 'chunk-', '')
+       OR ('knowledge-item:' || id) = ?
+       OR text = ?
+  `);
+
+  for (const res of rawResults) {
+    const meta = stmt.get(res.chunk.id) as any;
+    if (meta) {
+      if (!allowedLibraryIds.includes(meta.library_id)) continue;
+
+      const citation: Citation = {
+        id: meta.ref_id,
+        documentId: meta.document_id,
+        revisionId: meta.revision_id,
+        sourceUri: meta.source_key,
+        span: {
+          startOffset: meta.start_offset,
+          endOffset: meta.end_offset,
+          startLine: meta.start_line,
+          endLine: meta.end_line,
+        },
+        hash: meta.hash,
+        commit: meta.commit_hash || undefined,
+        status: (meta.doc_status as KnowledgeStatus) || 'effective',
+        evidenceKind: meta.evidence_kind || 'document',
+        libraryId: meta.library_id,
+      };
+
+      hits.push({
+        text: res.chunk.text,
+        score: res.score,
+        citation,
+      });
+      continue;
+    }
+
+    const itemRow = itemStmt.get(
+      res.chunk.id,
+      res.chunk.source,
+      res.chunk.id,
+      res.chunk.id,
+      res.chunk.source,
+      res.chunk.text
+    ) as any;
+
+    if (itemRow) {
+      if (!allowedLibraryIds.includes(itemRow.library_id)) continue;
+      if (request.mode === 'fact' && itemRow.status === 'candidate') continue;
+      if (itemRow.status === 'invalidated' || itemRow.status === 'needs_review') continue;
+
+      let evidenceKind: any = 'document';
+      if (itemRow.kind === 'decision') evidenceKind = 'decision';
+      else if (itemRow.kind === 'observation') evidenceKind = 'observation';
+
+      const lines = (itemRow.text || '').split('\n');
+      const citation: Citation = {
+        id: `ref-${itemRow.id}`,
+        documentId: itemRow.id,
+        revisionId: `rev-${itemRow.id}`,
+        sourceUri: `knowledge-item:${itemRow.kind}`,
+        span: {
+          startOffset: 0,
+          endOffset: itemRow.text.length,
+          startLine: 1,
+          endLine: lines.length,
+        },
+        hash: crypto.createHash('sha256').update(itemRow.text).digest('hex'),
+        commit: undefined,
+        status: itemRow.status as KnowledgeStatus,
+        evidenceKind,
+        libraryId: itemRow.library_id,
+      };
+
+      hits.push({
+        text: res.chunk.text,
+        score: res.score,
+        citation,
+      });
+    }
+  }
+
+  return hits;
+}
+
+/**
+ * 沿图谱关系扩展邻接证据：
+ * 文本/符号召回前 5 个种子，最多沿有效 contains/imports/exports 2 跳；effective explains/constrains 可补充证据。
+ * experience 模式才可沿候选语义边，并保留候选标签。图扩展最多增加 10 个片段。
+ */
+export function graphEvidenceWithinScope(
+  store: KnowledgeStore,
+  seeds: KnowledgeHit[],
+  allowedLibraryIds: string[],
+  mode: QueryMode,
+  maxHops: number = 2,
+  maxAdditionalChunks: number = 10
+): KnowledgeHit[] {
+  if (seeds.length === 0 || allowedLibraryIds.length === 0) return [];
+
+  const topSeeds = seeds.slice(0, 5);
+  const inClause = allowedLibraryIds.map(() => '?').join(',');
+
+  const startNodeIds = new Set<string>();
+
+  for (const s of topSeeds) {
+    const c = s.citation;
+    if (c.documentId.startsWith('item-') || c.sourceUri.startsWith('knowledge-item:')) {
+      startNodeIds.add(c.documentId);
+    }
+
+    const entRows = store.db.prepare(`
+      SELECT id FROM entities
+      WHERE (path = ? OR revision_id = ?)
+        AND library_id IN (${inClause})
+    `).all(c.sourceUri, c.revisionId, ...allowedLibraryIds) as Array<{ id: string }>;
+    for (const er of entRows) {
+      startNodeIds.add(er.id);
+    }
+
+    const edgeEndpoints = store.db.prepare(`
+      SELECT source_id, target_id FROM edges
+      WHERE (source_id = ? OR target_id = ?)
+        AND library_id IN (${inClause})
+    `).all(c.documentId, c.documentId, ...allowedLibraryIds) as Array<{ source_id: string; target_id: string }>;
+    for (const ee of edgeEndpoints) {
+      startNodeIds.add(ee.source_id);
+      startNodeIds.add(ee.target_id);
+    }
+  }
+
+  if (startNodeIds.size === 0) return [];
+
+  const visitedNodes = new Set<string>(startNodeIds);
+  let frontier = Array.from(startNodeIds);
+  const reachedNodeInfo = new Map<string, { status: KnowledgeStatus; edgeKind: string }>();
+
+  const allowedStructuralKinds = new Set(['contains', 'imports', 'exports']);
+  const allowedSemanticKinds = new Set(['explains', 'constrains', 'supersedes']);
+
+  for (let hop = 0; hop < maxHops; hop++) {
+    if (frontier.length === 0) break;
+    const nextFrontier: string[] = [];
+
+    for (const currId of frontier) {
+      const edges = store.db.prepare(`
+        SELECT * FROM edges
+        WHERE (source_id = ? OR target_id = ?)
+          AND library_id IN (${inClause})
+      `).all(currId, currId, ...allowedLibraryIds) as any[];
+
+      for (const e of edges) {
+        if (e.status === 'invalidated' || e.status === 'needs_review') continue;
+
+        const isStructural = allowedStructuralKinds.has(e.kind);
+        const isSemantic = allowedSemanticKinds.has(e.kind);
+        if (!isStructural && !isSemantic) continue;
+
+        if (isStructural && e.status !== 'effective') continue;
+
+        if (isSemantic) {
+          if (mode === 'fact' && e.status !== 'effective') continue;
+          if (mode === 'experience' && e.status !== 'effective' && e.status !== 'candidate') continue;
+        }
+
+        const neighborId = e.source_id === currId ? e.target_id : e.source_id;
+        if (!visitedNodes.has(neighborId)) {
+          visitedNodes.add(neighborId);
+          reachedNodeInfo.set(neighborId, {
+            status: e.status as KnowledgeStatus,
+            edgeKind: e.kind,
+          });
+          nextFrontier.push(neighborId);
+        }
+      }
+    }
+
+    frontier = nextFrontier;
+  }
+
+  const additionalHits: KnowledgeHit[] = [];
+  const seedDocIds = new Set(topSeeds.map((s) => s.citation.documentId));
+
+  for (const [nodeId, info] of reachedNodeInfo.entries()) {
+    if (additionalHits.length >= maxAdditionalChunks) break;
+    if (seedDocIds.has(nodeId)) continue;
+
+    // 1. 检查是否为知识条目
+    const item = store.getKnowledgeItem(nodeId);
+    if (item && allowedLibraryIds.includes(item.libraryId)) {
+      if (item.status === 'invalidated' || item.status === 'needs_review') continue;
+      if (mode === 'fact' && item.status === 'candidate') continue;
+
+      const hitStatus = (info.status === 'candidate' || item.status === 'candidate')
+        ? 'candidate'
+        : 'effective';
+
+      let evidenceKind: any = 'document';
+      if (item.kind === 'decision') evidenceKind = 'decision';
+      else if (item.kind === 'observation') evidenceKind = 'observation';
+
+      const lines = item.text.split('\n');
+      additionalHits.push({
+        text: item.text,
+        score: 0.85,
+        citation: {
+          id: `ref-${item.id}`,
+          documentId: item.id,
+          revisionId: `rev-${item.id}`,
+          sourceUri: `knowledge-item:${item.kind}`,
+          span: {
+            startOffset: 0,
+            endOffset: item.text.length,
+            startLine: 1,
+            endLine: lines.length,
+          },
+          hash: crypto.createHash('sha256').update(item.text).digest('hex'),
+          status: hitStatus,
+          evidenceKind,
+          libraryId: item.libraryId,
+        },
+      });
+      continue;
+    }
+
+    // 2. 检查是否为代码实体
+    const ent = store.db.prepare(`
+      SELECT * FROM entities
+      WHERE id = ? AND library_id IN (${inClause})
+    `).get(nodeId, ...allowedLibraryIds) as any;
+
+    if (ent) {
+      const rev = store.readRevision(ent.revision_id);
+      let snippet = `// [code entity] ${ent.kind} ${ent.name}\n// ${ent.path}:${ent.start_line}-${ent.end_line}`;
+      if (rev) {
+        const fileLines = rev.content.split('\n');
+        snippet = fileLines.slice(ent.start_line - 1, ent.end_line).join('\n') || snippet;
+      }
+
+      additionalHits.push({
+        text: snippet,
+        score: 0.8,
+        citation: {
+          id: `ref-entity-${ent.id}`,
+          documentId: ent.id,
+          revisionId: ent.revision_id,
+          sourceUri: ent.path,
+          span: {
+            startOffset: ent.start_offset,
+            endOffset: ent.end_offset,
+            startLine: ent.start_line,
+            endLine: ent.end_line,
+          },
+          hash: rev ? rev.hash : '',
+          status: info.status,
+          evidenceKind: 'code',
+          libraryId: ent.library_id,
+        },
+      });
+      continue;
+    }
+
+    // 3. 检查是否为文档
+    const doc = store.getDocumentById(nodeId);
+    if (doc && doc.activeRevisionId) {
+      const rev = store.readRevision(doc.activeRevisionId);
+      if (rev) {
+        const lines = rev.content.split('\n');
+        additionalHits.push({
+          text: rev.content.slice(0, 500),
+          score: 0.75,
+          citation: {
+            id: `ref-doc-${doc.id}`,
+            documentId: doc.id,
+            revisionId: doc.activeRevisionId,
+            sourceUri: doc.sourceKey,
+            span: {
+              startOffset: 0,
+              endOffset: Math.min(rev.content.length, 500),
+              startLine: 1,
+              endLine: Math.min(lines.length, 25),
+            },
+            hash: rev.hash,
+            status: info.status,
+            evidenceKind: 'document',
+            libraryId: allowedLibraryIds[0] as string,
+          },
+        });
+      }
+    }
+  }
+
+  return additionalHits;
+}
+
+/**
+ * 合并去重并截断检索结果
+ */
+export function buildSearchResponse(
+  generation: number,
+  allowedLibraryIds: string[],
+  seeds: KnowledgeHit[],
+  related: KnowledgeHit[],
+  topK: number = 20
+): SearchResponse {
+  const seenDocIds = new Set<string>();
+  const combined: KnowledgeHit[] = [];
+
+  for (const s of seeds) {
+    const key = `${s.citation.documentId}:${s.citation.span.startLine}:${s.citation.span.endLine}`;
+    if (!seenDocIds.has(key)) {
+      seenDocIds.add(key);
+      combined.push(s);
+    }
+  }
+
+  for (const r of related) {
+    const key = `${r.citation.documentId}:${r.citation.span.startLine}:${r.citation.span.endLine}`;
+    if (!seenDocIds.has(key)) {
+      seenDocIds.add(key);
+      combined.push(r);
+    }
+  }
+
+  const finalHits = combined.slice(0, Math.min(topK, 20));
+  return {
+    generation,
+    libraryIds: allowedLibraryIds,
+    hits: finalHits,
+    warnings: [],
+  };
+}
+
+/**
  * 执行范围受限的混合知识检索。
  * 遵循只在当前已授权的库分区内检索、支持 fact 与 experience 模式、并输出可溯源的 Citation。
  */
@@ -53,17 +440,6 @@ export async function executeSearch(
     return emptySearchResponse(store.getGeneration());
   }
 
-  // 区分事实模式与经验模式的状态分区
-  const statuses: KnowledgeStatus[] =
-    request.mode === 'experience'
-      ? ['effective', 'candidate']
-      : ['effective'];
-
-  const collectionIds = resolveIndexKeys(allowedLibraryIds, statuses);
-  if (collectionIds.length === 0) {
-    return emptySearchResponse(store.getGeneration());
-  }
-
   // 在 SQLite 读事务前准备查询向量（若配置了 embedding）
   let queryVector: number[] | undefined;
   if (embedder && request.query.trim().length > 0) {
@@ -75,138 +451,34 @@ export async function executeSearch(
     }
   }
 
-  // 同步执行快照查询
+  // 同步执行快照查询，禁止 await 在 readSnapshot 内部
   return store.readSnapshot((generation) => {
-    const rawResults = store.vectorStore.searchPrepared(
-      request.query,
+    const seeds = searchPreparedWithinScope(
+      store,
+      request,
       queryVector,
-      request.topK || 5,
-      collectionIds
+      allowedLibraryIds
     );
 
-    const hits: KnowledgeHit[] = [];
+    const related = request.includeGraph
+      ? graphEvidenceWithinScope(
+          store,
+          seeds,
+          allowedLibraryIds,
+          request.mode,
+          2,
+          10
+        )
+      : [];
 
-    const stmt = store.db.prepare(`
-      SELECT
-        r.id AS ref_id,
-        r.document_id,
-        r.revision_id,
-        r.start_offset,
-        r.end_offset,
-        r.start_line,
-        r.end_line,
-        r.evidence_kind,
-        d.source_id,
-        d.source_key,
-        d.active_revision_id,
-        d.status AS doc_status,
-        s.library_id,
-        rev.hash,
-        rev.commit_hash
-      FROM chunk_refs r
-      JOIN documents d ON d.id = r.document_id
-      JOIN sources s ON s.id = d.source_id
-      JOIN revisions rev ON rev.id = r.revision_id
-      WHERE r.chunk_id = ?
-    `);
-
-    const itemStmt = store.db.prepare(`
-      SELECT * FROM knowledge_items
-      WHERE id = ?
-         OR id = ?
-         OR id = REPLACE(?, 'item-chunk-', '')
-         OR id = REPLACE(?, 'chunk-', '')
-         OR ('knowledge-item:' || id) = ?
-         OR text = ?
-    `);
-
-    for (const res of rawResults) {
-      const meta = stmt.get(res.chunk.id) as any;
-      if (meta) {
-        // 验证检索结果所属的 libraryId 是否在当前授权列表中
-        if (!allowedLibraryIds.includes(meta.library_id)) continue;
-
-        const citation: Citation = {
-          id: meta.ref_id,
-          documentId: meta.document_id,
-          revisionId: meta.revision_id,
-          sourceUri: meta.source_key,
-          span: {
-            startOffset: meta.start_offset,
-            endOffset: meta.end_offset,
-            startLine: meta.start_line,
-            endLine: meta.end_line,
-          },
-          hash: meta.hash,
-          commit: meta.commit_hash || undefined,
-          status: (meta.doc_status as KnowledgeStatus) || 'effective',
-          evidenceKind: meta.evidence_kind || 'document',
-          libraryId: meta.library_id,
-        };
-
-        hits.push({
-          text: res.chunk.text,
-          score: res.score,
-          citation,
-        });
-        continue;
-      }
-
-      // 检查沉淀知识条目
-      const itemRow = itemStmt.get(
-        res.chunk.id,
-        res.chunk.source,
-        res.chunk.id,
-        res.chunk.id,
-        res.chunk.source,
-        res.chunk.text
-      ) as any;
-
-      if (itemRow) {
-        if (!allowedLibraryIds.includes(itemRow.library_id)) continue;
-
-        // fact 模式排除 candidate
-        if (request.mode === 'fact' && itemRow.status === 'candidate') continue;
-        // 两种模式均排除 invalidated 与 needs_review
-        if (itemRow.status === 'invalidated' || itemRow.status === 'needs_review') continue;
-
-        let evidenceKind: any = 'document';
-        if (itemRow.kind === 'decision') evidenceKind = 'decision';
-        else if (itemRow.kind === 'observation') evidenceKind = 'observation';
-
-        const lines = (itemRow.text || '').split('\n');
-        const citation: Citation = {
-          id: `ref-${itemRow.id}`,
-          documentId: itemRow.id,
-          revisionId: `rev-${itemRow.id}`,
-          sourceUri: `knowledge-item:${itemRow.kind}`,
-          span: {
-            startOffset: 0,
-            endOffset: itemRow.text.length,
-            startLine: 1,
-            endLine: lines.length,
-          },
-          hash: crypto.createHash('sha256').update(itemRow.text).digest('hex'),
-          commit: undefined,
-          status: itemRow.status as KnowledgeStatus,
-          evidenceKind,
-          libraryId: itemRow.library_id,
-        };
-
-        hits.push({
-          text: res.chunk.text,
-          score: res.score,
-          citation,
-        });
-      }
-    }
-
-    return {
+    const effectiveTopK = Math.min(Math.max(request.topK || 5, 1), 20);
+    return buildSearchResponse(
       generation,
-      libraryIds: allowedLibraryIds,
-      hits,
-      warnings: [],
-    };
+      allowedLibraryIds,
+      seeds,
+      related,
+      request.includeGraph ? Math.min(effectiveTopK + related.length, 20) : effectiveTopK
+    );
   });
 }
 

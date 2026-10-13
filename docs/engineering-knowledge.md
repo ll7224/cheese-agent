@@ -203,3 +203,15 @@ Content-Type: application/json
 }
 ```
 纠错在单事务内将旧条目标记为 `invalidated`，生成 `status = 'effective'` 的替代新条目，记录 `supersedes` 关联并同步更新向量/FTS 分区与图谱关联边。历史原引用展示“已失效”，正式检索仅返回替代新条目。
+
+---
+
+## 10. 有界跨文档关系查询 (Bounded Cross-Document Graph Query)
+
+当检索请求指定 `includeGraph: true` 时，系统在同一个快照 `generation` 内同步执行有界图谱扩展：
+- **种子选取**: 从混合搜索结果中选取最多前 5 个种子；
+- **有界 BFS 关系遍历**: 最多沿有效 `contains`/`imports`/`exports` 扩展 2 跳；`effective` 状态的 `explains`/`constrains` 作为补充证据；
+- **候选边受控访问**: 仅在 `mode === 'experience'` 时才允许沿 `candidate` 语义边扩展，并保留“候选 (待验证)”标签与虚线展示；`fact` 模式严格忽略所有候选边；
+- **失效边立即退出**: `invalidated` 或 `needs_review` 状态的旧条目与边绝不沿途扩展；
+- **容量与租户约束**: 图扩展最多增加 10 个补充片段，合并去重后总返回 `topK ≤ 20`，且严格限制在当前已授权的 `libraryIds` 作用域内，杜绝跨项目跨租户越界。
+

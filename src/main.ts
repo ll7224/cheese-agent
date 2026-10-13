@@ -28,7 +28,7 @@ import {
 import { estimateMessageTokens } from './context/defense.js';
 import { UsageTracker } from './usage/tracker.js';
 import { MemoryStore } from './memory/store.js';
-import { memoryContext, ragContext } from './context/prompt-pipe.js';
+import { memoryContext, ragContext, engineeringKnowledgeRules } from './context/prompt-pipe.js';
 import { chunkDocument } from './rag/chunker.js';
 import { createMockEmbedder, createDashScopeEmbedder, embed } from './rag/embedder.js';
 import { SqliteVectorStore } from './rag/sqlite-store.js';
@@ -239,6 +239,7 @@ const builder = new PromptBuilder()
       return null;
     }
   } : () => null)
+  .pipe('engineeringRules', engineeringKnowledgeRules())
   .pipe('skillContext', () => skillLoader.buildPromptSection(activeSkills))
   .pipe('sessionContext', sessionContext());
 

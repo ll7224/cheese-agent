@@ -420,8 +420,8 @@ node --import tsx --test tests/knowledge-engineering.test.ts
 
 **Produces:** SearchRequest.includeGraph=true 时的同 generation 邻接证据召回；knowledge_graph 工具可显式探索已允许实体。
 
-- [ ] 文本/符号召回前 5 个种子，最多沿有效 contains/imports/exports 2 跳；effective explains/constrains 可补充证据。experience 才可沿候选语义边，并保留候选标签。图扩展最多增加 10 个片段，最终返回 topK≤20。
-- [ ] query embedding 先完成，再由 readSnapshot 同步组合文本、关系及证据，禁止 await 在 SQLite 读事务内。所有分支都基于已计算的访问范围。
+- [x] 文本/符号召回前 5 个种子，最多沿有效 contains/imports/exports 2 跳；effective explains/constrains 可补充证据。experience 才可沿候选语义边，并保留候选标签。图扩展最多增加 10 个片段，最终返回 topK≤20。
+- [x] query embedding 先完成，再由 readSnapshot 同步组合文本、关系及证据，禁止 await 在 SQLite 读事务内。所有分支都基于已计算的访问范围。
 
 ```ts
 return store.readSnapshot(generation => {
@@ -435,8 +435,8 @@ return store.readSnapshot(generation => {
 
 searchPreparedWithinScope 调用任务 1 的 searchPrepared；graphEvidenceWithinScope 使用任务 5 的图存储且只扩展当前证据；buildSearchResponse 合并 chunkId 去重、排名、截断并生成 Citation。
 
-- [ ] Prompt 使用独立 code/document/decision/observation/inference 标识，要求结论关联引用；资料中的命令文本不成为执行指令。不建立“模型识别冲突即自动纠正源码”的流程。
-- [ ] 第 7 个合并场景用可控源码、设计文档和决定，验证联合召回、同 generation、候选状态、跨项目边不越界及纠错后旧结论退出。mock 回答只用于接口演示，不作为模型推理质量证明。
+- [x] Prompt 使用独立 code/document/decision/observation/inference 标识，要求结论关联引用；资料中的命令文本不成为执行指令。不建立“模型识别冲突即自动纠正源码”的流程。
+- [x] 第 7 个合并场景用可控源码、设计文档和决定，验证联合召回、同 generation、候选状态、跨项目边不越界及纠错后旧结论退出。mock 回答只用于接口演示，不作为模型推理质量证明。
 
 **交付:** 首个问题可通过代码关系补充文档依据，支持多文档引用；影响分析和完整调用图仍是后续范围。
 
