@@ -1,14 +1,17 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { KnowledgeStore } from './store.js';
 import { LocalSyncManager, type EmbeddingFn } from './local-sync.js';
 import { discoverWorkspaceSources } from './sources.js';
+import { resolveLibraries } from './libraries.js';
 import {
   executeSearch,
   getCitationView,
   executeIngest,
 } from './retriever.js';
 import { queryGraph } from './graph.js';
+import { CaptureQueue, type CaptureInput } from './capture.js';
 import type {
   KnowledgeContext,
   SourceProposal,
@@ -18,6 +21,8 @@ import type {
   CitationView,
   KnowledgeRequest,
   GraphView,
+  KnowledgeItem,
+  KnowledgeStatus,
 } from './types.js';
 
 export interface KnowledgeServiceOptions {
@@ -34,6 +39,7 @@ export interface KnowledgeServiceOptions {
 export class KnowledgeService {
   readonly store: KnowledgeStore;
   readonly localSync: LocalSyncManager;
+  readonly captureQueue: CaptureQueue;
   private readonly options: KnowledgeServiceOptions;
 
   constructor(options: KnowledgeServiceOptions) {
@@ -54,6 +60,10 @@ export class KnowledgeService {
 
     this.localSync = new LocalSyncManager(this.store, {
       embedder: defaultEmbedder,
+    });
+
+    this.captureQueue = new CaptureQueue(this.store, {
+      modelForWorkspace: options.modelForWorkspace,
     });
   }
 
@@ -183,6 +193,70 @@ export class KnowledgeService {
   }
 
   /**
+   * 异步将执行会话沉淀任务排入队列
+   */
+  enqueueCapture(ctx: KnowledgeContext, input: CaptureInput): void {
+    this.attachWorkspace(ctx);
+    this.captureQueue.enqueue(ctx, input);
+  }
+
+  /**
+   * 列出当前上下文可访问的沉淀条目
+   */
+  listItems(ctx: KnowledgeContext, status?: KnowledgeStatus): KnowledgeItem[] {
+    const allLibs = this.store.listLibraries();
+    const accessibleIds = resolveLibraries(allLibs, ctx);
+    return this.store.listKnowledgeItems({
+      libraryIds: accessibleIds,
+      status,
+    });
+  }
+
+  /**
+   * 纠错条目：旧条目 invalidated，并以新文本生成替代条目
+   */
+  correctItem(ctx: KnowledgeContext, id: string, replacement: string): KnowledgeItem {
+    const existing = this.store.getKnowledgeItem(id);
+    if (!existing) {
+      throw new Error(`Knowledge item not found: ${id}`);
+    }
+
+    const allLibs = this.store.listLibraries();
+    const accessibleIds = resolveLibraries(allLibs, ctx);
+    if (!accessibleIds.includes(existing.libraryId)) {
+      throw new Error(`Access denied to knowledge item: ${id}`);
+    }
+
+    const newItemId = `item-${randomUUID()}`;
+    const now = Date.now();
+
+    const newItem: KnowledgeItem = {
+      id: newItemId,
+      kind: existing.kind,
+      status: 'effective',
+      text: replacement,
+      libraryId: existing.libraryId,
+      evidenceIds: existing.evidenceIds,
+      applicability: existing.applicability,
+      originRunId: existing.originRunId,
+      supersedes: existing.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const tx = this.store.db.transaction(() => {
+      this.store.updateKnowledgeItem(existing.id, {
+        status: 'invalidated',
+        updatedAt: now,
+      });
+      this.store.createKnowledgeItem(newItem);
+    });
+    tx();
+
+    return newItem;
+  }
+
+  /**
    * 统一分发 KnowledgeRequest
    */
   async dispatch(ctx: KnowledgeContext, request: KnowledgeRequest): Promise<unknown> {
@@ -208,6 +282,7 @@ export class KnowledgeService {
    * 关闭所有监听与底层存储连接
    */
   async close(): Promise<void> {
+    this.captureQueue.close();
     await this.localSync.close();
     this.store.close();
   }

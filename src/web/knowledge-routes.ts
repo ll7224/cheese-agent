@@ -5,6 +5,7 @@ import { RuntimeError } from '../runtime/service.js';
 import type { KnowledgeContext, SearchRequest } from '../knowledge/types.js';
 import { bindAgentLibraries, getAgentLibraryIds, resolveLibraries } from '../knowledge/libraries.js';
 import { chunkWithSpans } from '../knowledge/chunks.js';
+import { getExecutionEvidence } from '../knowledge/evidence.js';
 
 export function createKnowledgeRoutes(runtime: Runtime): Hono {
   const routes = new Hono();
@@ -485,6 +486,83 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
       snippet: snippetLines.join('\n'),
       fullContent: rev.content,
     });
+  });
+
+  // 14. GET /api/v1/workspaces/:id/knowledge/items
+  routes.get('/api/v1/workspaces/:id/knowledge/items', (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const status = context.req.query('status') as any;
+    const items = runtime.knowledgeService.listItems(ctx, status || undefined);
+    return context.json(items);
+  });
+
+  // 15. POST /api/v1/workspaces/:id/knowledge/items/:itemId/correct
+  routes.post('/api/v1/workspaces/:id/knowledge/items/:itemId/correct', async (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const itemId = context.req.param('itemId');
+    const body = await context.req.json();
+    if (!body.replacement || typeof body.replacement !== 'string') {
+      return context.json({ error: 'replacement 必填' }, 400);
+    }
+    try {
+      const corrected = runtime.knowledgeService.correctItem(ctx, itemId, body.replacement);
+      return context.json(corrected);
+    } catch (err: any) {
+      if (err.message?.includes('not found')) {
+        throw new RuntimeError(err.message, 404);
+      }
+      if (err.message?.includes('denied')) {
+        throw new RuntimeError(err.message, 403);
+      }
+      throw err;
+    }
+  });
+
+  // 16. POST /api/v1/workspaces/:id/knowledge/items/:itemId/share
+  routes.post('/api/v1/workspaces/:id/knowledge/items/:itemId/share', async (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const itemId = context.req.param('itemId');
+    const body = await context.req.json();
+    if (!body.targetLibraryId || typeof body.targetLibraryId !== 'string') {
+      return context.json({ error: 'targetLibraryId 必填' }, 400);
+    }
+    const targetLib = runtime.knowledgeService.store.getLibrary(body.targetLibraryId);
+    if (!targetLib || targetLib.scope !== 'public') {
+      return context.json({ error: '目标库必须是存在的 public 公共库' }, 400);
+    }
+    const item = runtime.knowledgeService.store.getKnowledgeItem(itemId);
+    if (!item) {
+      throw new RuntimeError('条目不存在', 404);
+    }
+    const allLibs = runtime.knowledgeService.store.listLibraries();
+    const accessibleIds = resolveLibraries(allLibs, ctx);
+    if (!accessibleIds.includes(item.libraryId)) {
+      throw new RuntimeError('无权访问此条目', 404);
+    }
+
+    const shared = runtime.knowledgeService.store.createKnowledgeItem({
+      id: `shared-${item.id}-${Date.now().toString(36)}`,
+      kind: item.kind,
+      status: item.status,
+      text: item.text,
+      libraryId: targetLib.id,
+      evidenceIds: item.evidenceIds,
+      applicability: item.applicability,
+      originRunId: item.originRunId,
+      supersedes: item.supersedes,
+    });
+    return context.json(shared, 201);
+  });
+
+  // 17. GET /api/v1/workspaces/:id/knowledge/evidence/:executionId
+  routes.get('/api/v1/workspaces/:id/knowledge/evidence/:executionId', (context) => {
+    getContext(context.req.param('id'));
+    const executionId = context.req.param('executionId');
+    const evidence = getExecutionEvidence(runtime.knowledgeService.store.db, executionId);
+    if (!evidence) {
+      throw new RuntimeError('执行证据不存在', 404);
+    }
+    return context.json(evidence);
   });
 
   return routes;

@@ -78,6 +78,8 @@ export class KnowledgeController {
           this.loadDocuments();
         } else if (btn.dataset.tab === 'graph') {
           this.loadGraph();
+        } else if (btn.dataset.tab === 'items') {
+          this.loadItems();
         }
       });
     });
@@ -119,6 +121,16 @@ export class KnowledgeController {
     c.querySelector('#kn-refresh-discover-btn').addEventListener('click', () => {
       this.loadDiscoveries();
     });
+
+    // 沉淀与经验
+    const filterStatus = c.querySelector('#kn-items-filter-status');
+    if (filterStatus) {
+      filterStatus.addEventListener('change', () => this.loadItems());
+    }
+    const refreshItemsBtn = c.querySelector('#kn-refresh-items-btn');
+    if (refreshItemsBtn) {
+      refreshItemsBtn.addEventListener('click', () => this.loadItems());
+    }
   }
 
   // --- API 交互 ---
@@ -829,6 +841,106 @@ export class KnowledgeController {
         await this.loadSources();
       } catch (err) {
         alert('添加来源失败: ' + err.message);
+      }
+    });
+  }
+
+  async loadItems() {
+    const tbody = this.container.querySelector('#kn-items-tbody');
+    const countEl = this.container.querySelector('#kn-items-count');
+    const filterSelect = this.container.querySelector('#kn-items-filter-status');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="5" class="table-empty">加载沉淀条目中…</td></tr>';
+
+    try {
+      const status = filterSelect ? filterSelect.value : '';
+      const query = status ? `?status=${encodeURIComponent(status)}` : '';
+      const items = await this.fetchApi(`/items${query}`);
+
+      if (countEl) countEl.textContent = `共 ${items.length} 条沉淀`;
+
+      if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="table-empty">暂无沉淀条目</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = '';
+      items.forEach((item) => {
+        const tr = document.createElement('tr');
+        const kindBadge = `<span class="evidence-kind-tag kind-${item.kind}">${escapeHtml(item.kind)}</span>`;
+        const statusBadge = `<span class="citation-status-pill status-pill-${item.status}">${escapeHtml(item.status)}</span>`;
+
+        tr.innerHTML = `
+          <td>${kindBadge}</td>
+          <td>${statusBadge}</td>
+          <td>
+            <div class="item-text">${escapeHtml(item.text)}</div>
+            ${item.supersedes ? `<div class="item-supersedes" style="font-size: 11px; color: var(--text-muted, #888); margin-top: 4px;">替代旧条目: <code>${escapeHtml(item.supersedes)}</code></div>` : ''}
+          </td>
+          <td><code>${escapeHtml(item.applicability || '-')}</code></td>
+          <td>
+            <button class="mini-btn btn-correct-item action-tag-btn" type="button">纠错</button>
+          </td>
+        `;
+
+        tr.querySelector('.btn-correct-item').addEventListener('click', () => {
+          this.showCorrectItemDialog(item);
+        });
+
+        tbody.appendChild(tr);
+      });
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="5" class="table-error">加载失败: ${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  showCorrectItemDialog(item) {
+    const root = this.container.querySelector('#kn-dialogs-root');
+    root.innerHTML = `
+      <dialog id="kn-modal-correct" class="kn-modal">
+        <div class="dialog-heading">
+          <div class="dialog-title-group">
+            <span class="dialog-badge">知识纠错</span>
+            <h2>纠正沉淀条目</h2>
+          </div>
+          <button class="icon-button btn-close-modal" type="button">✕</button>
+        </div>
+        <form id="kn-correct-item-form" class="kn-form">
+          <div class="form-row">
+            <label>原条目内容</label>
+            <div class="form-readonly-text" style="padding: 8px 12px; background: var(--bg-hover, rgba(0,0,0,0.05)); border-radius: 4px; font-size: 13px;">${escapeHtml(item.text)}</div>
+          </div>
+          <div class="form-row">
+            <label>纠正后的新结论 / 文本</label>
+            <textarea id="kn-correct-text" rows="4" class="form-textarea" required placeholder="输入纠正后的准确规则、决策或结论…"></textarea>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="ghost-btn btn-close-modal">取消</button>
+            <button type="submit" class="send-button">确认纠错</button>
+          </div>
+        </form>
+      </dialog>
+    `;
+
+    const dialog = root.querySelector('#kn-modal-correct');
+    dialog.showModal();
+    root.querySelectorAll('.btn-close-modal').forEach((b) => b.addEventListener('click', () => dialog.close()));
+
+    root.querySelector('#kn-correct-item-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const replacement = root.querySelector('#kn-correct-text').value.trim();
+      if (!replacement) return;
+
+      try {
+        await this.fetchApi(`/items/${item.id}/correct`, {
+          method: 'POST',
+          body: { replacement },
+        });
+        dialog.close();
+        await this.loadItems();
+      } catch (err) {
+        alert('纠错失败: ' + err.message);
       }
     });
   }

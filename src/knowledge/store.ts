@@ -708,6 +708,205 @@ export class KnowledgeStore {
   }
 
   /**
+   * 创建或保存沉淀知识条目
+   */
+  createKnowledgeItem(item: import('./types.js').KnowledgeItem): import('./types.js').KnowledgeItem {
+    const createdAt = item.createdAt || Date.now();
+    const updatedAt = item.updatedAt || createdAt;
+    const evidenceIdsJson = JSON.stringify(item.evidenceIds || []);
+
+    this.db.prepare(`
+      INSERT OR REPLACE INTO knowledge_items (
+        id, kind, status, text, library_id, evidence_ids, applicability, origin_run_id, supersedes, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      item.id,
+      item.kind,
+      item.status,
+      item.text,
+      item.libraryId,
+      evidenceIdsJson,
+      item.applicability || null,
+      item.originRunId || null,
+      item.supersedes || null,
+      createdAt,
+      updatedAt
+    );
+
+    return { ...item, createdAt, updatedAt };
+  }
+
+  /**
+   * 获取指定 ID 的知识条目
+   */
+  getKnowledgeItem(id: string): import('./types.js').KnowledgeItem | null {
+    const row = this.db.prepare(`SELECT * FROM knowledge_items WHERE id = ?`).get(id) as any;
+    if (!row) return null;
+    let evidenceIds: string[] = [];
+    try {
+      evidenceIds = JSON.parse(row.evidence_ids || '[]');
+    } catch {
+      evidenceIds = [];
+    }
+    return {
+      id: row.id,
+      kind: row.kind,
+      status: row.status,
+      text: row.text,
+      libraryId: row.library_id,
+      evidenceIds,
+      applicability: row.applicability || undefined,
+      originRunId: row.origin_run_id || undefined,
+      supersedes: row.supersedes || undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  /**
+   * 列出符合条件的知识条目
+   */
+  listKnowledgeItems(options: {
+    libraryIds?: string[];
+    status?: import('./types.js').KnowledgeStatus;
+    originRunId?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): import('./types.js').KnowledgeItem[] {
+    const limit = Math.min(Math.max(options.limit || 50, 1), 100);
+    const offset = Math.max(options.offset || 0, 0);
+    const where: string[] = [];
+    const params: any[] = [];
+
+    if (options.libraryIds && options.libraryIds.length > 0) {
+      where.push(`library_id IN (${options.libraryIds.map(() => '?').join(',')})`);
+      params.push(...options.libraryIds);
+    }
+    if (options.status) {
+      where.push(`status = ?`);
+      params.push(options.status);
+    }
+    if (options.originRunId) {
+      where.push(`origin_run_id = ?`);
+      params.push(options.originRunId);
+    }
+
+    let sql = `SELECT * FROM knowledge_items`;
+    if (where.length > 0) {
+      sql += ` WHERE ` + where.join(' AND ');
+    }
+    sql += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const rows = this.db.prepare(sql).all(...params) as any[];
+    return rows.map((row) => {
+      let evidenceIds: string[] = [];
+      try {
+        evidenceIds = JSON.parse(row.evidence_ids || '[]');
+      } catch {
+        evidenceIds = [];
+      }
+      return {
+        id: row.id,
+        kind: row.kind,
+        status: row.status,
+        text: row.text,
+        libraryId: row.library_id,
+        evidenceIds,
+        applicability: row.applicability || undefined,
+        originRunId: row.origin_run_id || undefined,
+        supersedes: row.supersedes || undefined,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    });
+  }
+
+  /**
+   * 更新知识条目
+   */
+  updateKnowledgeItem(
+    id: string,
+    updates: Partial<import('./types.js').KnowledgeItem>
+  ): import('./types.js').KnowledgeItem | null {
+    const existing = this.getKnowledgeItem(id);
+    if (!existing) return null;
+
+    const updated: import('./types.js').KnowledgeItem = {
+      ...existing,
+      ...updates,
+      updatedAt: Date.now(),
+    };
+
+    const evidenceIdsJson = JSON.stringify(updated.evidenceIds || []);
+    this.db.prepare(`
+      UPDATE knowledge_items
+      SET kind = ?, status = ?, text = ?, library_id = ?, evidence_ids = ?, applicability = ?, origin_run_id = ?, supersedes = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      updated.kind,
+      updated.status,
+      updated.text,
+      updated.libraryId,
+      evidenceIdsJson,
+      updated.applicability || null,
+      updated.originRunId || null,
+      updated.supersedes || null,
+      updated.updatedAt,
+      id
+    );
+
+    return updated;
+  }
+
+  /**
+   * 记录 CaptureJob 作业
+   */
+  createCaptureJob(job: {
+    id: string;
+    runId: string;
+    status: string;
+    error?: string;
+    createdAt?: number;
+  }): void {
+    const createdAt = job.createdAt || Date.now();
+    this.db.prepare(`
+      INSERT OR REPLACE INTO capture_jobs (id, run_id, status, error, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(job.id, job.runId, job.status, job.error || null, createdAt);
+  }
+
+  /**
+   * 获取指定 runId 的 CaptureJob
+   */
+  getCaptureJob(runId: string): {
+    id: string;
+    runId: string;
+    status: string;
+    error?: string;
+    createdAt: number;
+  } | null {
+    const row = this.db.prepare(`SELECT * FROM capture_jobs WHERE run_id = ?`).get(runId) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      runId: row.run_id,
+      status: row.status,
+      error: row.error || undefined,
+      createdAt: row.created_at,
+    };
+  }
+
+  /**
+   * 更新 CaptureJob 状态
+   */
+  updateCaptureJob(runId: string, status: string, error?: string): void {
+    this.db.prepare(`
+      UPDATE capture_jobs SET status = ?, error = ? WHERE run_id = ?
+    `).run(status, error || null, runId);
+  }
+
+  /**
    * 关闭底层数据库
    */
   close(): void {

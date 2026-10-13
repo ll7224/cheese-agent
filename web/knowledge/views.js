@@ -64,6 +64,7 @@ export function buildKnowledgeShell() {
       <button class="kn-tab-btn" data-tab="sources" type="button">🌐 来源清单与同步</button>
       <button class="kn-tab-btn" data-tab="bindings" type="button">🤖 智能体绑定</button>
       <button class="kn-tab-btn" data-tab="graph" type="button">🕸 代码图谱</button>
+      <button class="kn-tab-btn" data-tab="items" type="button">💡 沉淀与经验</button>
     </div>
 
     <div class="knowledge-tab-content">
@@ -150,6 +151,41 @@ export function buildKnowledgeShell() {
       <!-- 代码图谱 Tab -->
       <section id="kn-tab-graph" class="kn-tab-pane" hidden>
         <div id="kn-graph-root"></div>
+      </section>
+
+      <!-- 沉淀与经验 Tab -->
+      <section id="kn-tab-items" class="kn-tab-pane" hidden>
+        <div class="pane-toolbar">
+          <div class="toolbar-left">
+            <span class="toolbar-stat" id="kn-items-count">共 0 条沉淀</span>
+            <select id="kn-items-filter-status" class="kn-mini-select">
+              <option value="">全部状态</option>
+              <option value="effective">已生效 (Effective)</option>
+              <option value="candidate">候选建议 (Candidate)</option>
+              <option value="needs_review">待复核 (Needs Review)</option>
+              <option value="invalidated">已失效 (Invalidated)</option>
+            </select>
+          </div>
+          <div class="toolbar-right">
+            <button id="kn-refresh-items-btn" class="action-tag-btn" type="button">🔄 刷新沉淀</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table class="kn-table">
+            <thead>
+              <tr>
+                <th style="width: 100px;">类型</th>
+                <th style="width: 100px;">状态</th>
+                <th>内容与结论</th>
+                <th style="width: 160px;">适用环境</th>
+                <th style="width: 120px;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="kn-items-tbody">
+              <tr><td colspan="5" class="table-empty">加载中…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
 

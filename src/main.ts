@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline';
 import { getModel } from './agent/model.js';
 import { ToolRegistry } from './tools/registry.js';
 import { allTools } from './tools/index.js';
+import { createBashTool } from './tools/bash.js';
 import { createToolSearchTool } from './tools/tool-search.js';
 import { createMemoryTool } from './tools/memory-tools.js';
 import { createRagTools } from './tools/rag-tools.js';
@@ -481,6 +482,14 @@ export async function runTask(messages: ModelMessage[], options: ExecutionOption
     };
     const rpc = createKnowledgeRpcDispatcher(ks, cliKnowledgeCtx, options.signal);
     registry.register(...createKnowledgeTools(rpc, options.emit));
+  }
+
+  if (options.emit) {
+    registry.register(
+      createBashTool((evidence) => {
+        options.emit?.({ type: 'execution-evidence', ...evidence });
+      })
+    );
   }
 
   // 3. 动态组装系统提示词（融入领域专用 Prompt）

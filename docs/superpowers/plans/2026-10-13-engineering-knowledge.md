@@ -365,7 +365,7 @@ KnowledgeService.correctItem(ctx: KnowledgeContext, id: string, replacement: str
 
 KnowledgeItem 为 {id,kind,status,text,libraryId,evidenceIds,applicability,originRunId?,supersedes?}。CaptureJob 按 runId 唯一；恢复时仅重试提取，不重放工具。
 
-- [ ] 把 bash 实现移到 tools/bash.ts，导出 bashTool 和 createBashTool(onEvidence?)；现有 tools/index.ts 重新导出，原工具文本返回和 RBAC/命令分类流程保持。runTask 为实际执行注册带当前 emit 回调的版本。
+- [x] 把 bash 实现移到 tools/bash.ts，导出 bashTool 和 createBashTool(onEvidence?)；现有 tools/index.ts 重新导出，原工具文本返回和 RBAC/命令分类流程保持。runTask 为实际执行注册带当前 emit 回调的版本。
 
 ```ts
 interface CommandEvidence {
@@ -379,12 +379,12 @@ const record = (evidence: CommandEvidence) =>
 
 在实际 execSync 成功/失败分支调用 record，executionId 在调用前生成；失败 status=null/timeout 不解释为成功。记录已发生的执行，不为核验额外重跑测试。输出继续走既有脱敏和事件大小限制。
 
-- [ ] Runtime 发最终 status 后异步 enqueueCapture，未完成/取消任务不生成成功观察；队列容量默认 20，满时保存 pending 作业稍后处理，不阻塞任务完成，也不占用 Agent 根任务额度。
-- [ ] 规则提取明确工具观察与用户显式决定，保存原句/事件。模型可每 Run 补充一次结构化候选提取，最大 20 个条目、输入预算 12k tokens、请求时限 15 秒；无模型配置时规则继续可用，失败只记录 capture error，不让已完成 Run 失败。close 取消尚未完成的模型请求，保留可恢复作业，不无限等待。
-- [ ] 用户原话和前文映射明确才能生效为 decision；命令 exitCode=0 只生效为“该环境的本次执行成功”，不得泛化到架构可靠。其他建议、经验、概念关系默认 candidate；reasoning 不参加提取。
-- [ ] Item 的 evidenceIds 指向不可变原文版本或脱敏事件快照，capture 信息项目私有。来源变更使相关观察/经验 needs_review，用户决定仅在明确纠正/替代时失效。
-- [ ] POST /api/v1/workspaces/:id/knowledge/items/:itemId/correct 用新文本替代旧条目；POST .../share 需显式选择目标 public 库。candidate 手动发布要附原始依据或标记为用户认可的经验，不伪装外部事实。
-- [ ] 第 6 个合并场景：同 run 去重、用户明确决定生效、歧义推荐仍候选、exitCode=0 的观察保持环境范围、超时/返回错误文本不生效、模型自证链拒绝成为核验依据。
+- [x] Runtime 发最终 status 后异步 enqueueCapture，未完成/取消任务不生成成功观察；队列容量默认 20，满时保存 pending 作业稍后处理，不阻塞任务完成，也不占用 Agent 根任务额度。
+- [x] 规则提取明确工具观察与用户显式决定，保存原句/事件。模型可每 Run 补充一次结构化候选提取，最大 20 个条目、输入预算 12k tokens、请求时限 15 秒；无模型配置时规则继续可用，失败只记录 capture error，不让已完成 Run 失败。close 取消尚未完成的模型请求，保留可恢复作业，不无限等待。
+- [x] 用户原话和前文映射明确才能生效为 decision；命令 exitCode=0 只生效为“该环境的本次执行成功”，不得泛化到架构可靠。其他建议、经验、概念关系默认 candidate；reasoning 不参加提取。
+- [x] Item 的 evidenceIds 指向不可变原文版本或脱敏事件快照，capture 信息项目私有。来源变更使相关观察/经验 needs_review，用户决定仅在明确纠正/替代时失效。
+- [x] POST /api/v1/workspaces/:id/knowledge/items/:itemId/correct 用新文本替代旧条目；POST .../share 需显式选择目标 public 库。candidate 手动发布要附原始依据或标记为用户认可的经验，不伪装外部事实。
+- [x] 第 6 个合并场景：同 run 去重、用户明确决定生效、歧义推荐仍候选、exitCode=0 的观察保持环境范围、超时/返回错误文本不生效、模型自证链拒绝成为核验依据。
 
 **交付:** 使用经验持续进入知识中心，引用能解释条目为何生效。
 

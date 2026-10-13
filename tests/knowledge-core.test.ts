@@ -7,6 +7,7 @@ import { createKnowledgeTestEnv, seedDocument } from './helpers/knowledge-fixtur
 import { chunkWithSpans } from '../src/knowledge/chunks.js';
 import { KnowledgeService } from '../src/knowledge/service.js';
 import type { KnowledgeContext } from '../src/knowledge/types.js';
+import type { CaptureInput } from '../src/knowledge/capture.js';
 import { Runtime } from '../src/runtime/service.js';
 
 test('Scenario 1: 长文变短文/删除后旧片段退出而历史原文可读', async (t) => {
@@ -678,4 +679,168 @@ export function calculate(): number {
     !p1Overview.nodes.some((n) => n.name === 'secretAlgorithm' || n.path === 'secret.ts'),
     'P1 总览中绝对不能泄露 P2 的代码实体'
   );
+});
+
+test('Scenario 6: 自动沉淀、同 run 去重、显式决定与可信执行记录', async (t) => {
+  const env = createKnowledgeTestEnv(t);
+  const store = env.store;
+  const service = new KnowledgeService({ dataDir: env.tempDir, store });
+
+  const ctx: KnowledgeContext = {
+    workspaceId: 'ws-capture',
+    workspacePath: env.tempDir,
+    agentId: 'general',
+    role: 'owner',
+  };
+  service.attachWorkspace(ctx);
+
+  const runId1 = 'run-test-001';
+
+  // 1. 构造含有执行证据的输入：
+  // - 一条 exitCode = 0 且无超时的成功命令
+  // - 一条 timedOut = true 的超时命令
+  // - 一条 exitCode = 1 的失败命令
+  // - 用户明确决定
+  // - 歧义推荐语句
+  // - 模型的自证链（经测试代码完全正确...）以及一条标准建议
+  const input1: CaptureInput = {
+    runId: runId1,
+    sessionId: 'session-001',
+    workspaceId: 'ws-capture',
+    userInput: '我们决定统一采用 TypeScript 严格模式进行类型检查',
+    messages: [
+      { role: 'user', content: '我们决定统一采用 TypeScript 严格模式进行类型检查' },
+      {
+        role: 'assistant',
+        content: `经测试代码完全正确，我已经全面验证了该架构是绝对可靠的。\n建议：在 CI 中加入 pnpm typecheck 步骤以阻断错误。`,
+      },
+    ],
+    events: [
+      {
+        id: 'evt-1',
+        runId: runId1,
+        sessionId: 'session-001',
+        workspaceId: 'ws-capture',
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        type: 'execution-evidence',
+        executionId: 'exec-success-01',
+        command: 'pnpm test',
+        cwd: env.tempDir,
+        exitCode: 0,
+        timedOut: false,
+        stdout: 'Tests passed: 42',
+        stderr: '',
+      },
+      {
+        id: 'evt-2',
+        runId: runId1,
+        sessionId: 'session-001',
+        workspaceId: 'ws-capture',
+        sequence: 2,
+        timestamp: new Date().toISOString(),
+        type: 'execution-evidence',
+        executionId: 'exec-timeout-02',
+        command: 'sleep 100',
+        cwd: env.tempDir,
+        exitCode: null,
+        timedOut: true,
+        stdout: '',
+        stderr: 'Process killed due to timeout',
+      },
+      {
+        id: 'evt-3',
+        runId: runId1,
+        sessionId: 'session-001',
+        workspaceId: 'ws-capture',
+        sequence: 3,
+        timestamp: new Date().toISOString(),
+        type: 'execution-evidence',
+        executionId: 'exec-failed-03',
+        command: 'exit 1',
+        cwd: env.tempDir,
+        exitCode: 1,
+        timedOut: false,
+        stdout: '',
+        stderr: 'Command failed with exit code 1',
+      },
+    ],
+    environment: {
+      cwd: env.tempDir,
+      runtimeVersion: '1.0.0',
+    },
+  };
+
+  // 1. 触发 enqueueCapture
+  service.enqueueCapture(ctx, input1);
+  await service.captureQueue.waitForRun(runId1);
+
+  // 2. 验证：同 run 去重 (再次 enqueueCapture 同一 runId)
+  service.enqueueCapture(ctx, input1);
+  // 检查作业表中仅有一条记录
+  const jobRows = store.db.prepare('SELECT * FROM capture_jobs WHERE run_id = ?').all(runId1);
+  assert.equal(jobRows.length, 1, '同 runId 作业必须去重');
+
+  const itemsRun1 = service.listItems(ctx);
+
+  // 3. 验证：用户明确决定生效
+  const decisionItem = itemsRun1.find((i) => i.kind === 'decision');
+  assert.ok(decisionItem, '用户明确决定必须被提取');
+  assert.equal(decisionItem.status, 'effective', '明确决定必须是 effective 状态');
+  assert.ok(decisionItem.text.includes('TypeScript 严格模式'));
+
+  // 4. 验证：exitCode = 0 的观察生效且保持环境范围
+  const successObs = itemsRun1.find((i) => i.evidenceIds.includes('exec-success-01'));
+  assert.ok(successObs, 'exitCode=0 的命令必须生成观察');
+  assert.equal(successObs.kind, 'observation');
+  assert.equal(successObs.status, 'effective', '成功执行命令必须是 effective 状态');
+  assert.equal(successObs.applicability, env.tempDir, '观察必须保留环境 cwd 范围');
+  assert.ok(successObs.text.includes('pnpm test'));
+
+  // 5. 验证：超时/返回错误文本不生效 (不生成 effective observation)
+  const timeoutObs = itemsRun1.find((i) => i.evidenceIds.includes('exec-timeout-02'));
+  assert.equal(timeoutObs, undefined, '超时执行绝对不能生成 effective 观察');
+  const failedObs = itemsRun1.find((i) => i.evidenceIds.includes('exec-failed-03'));
+  assert.equal(failedObs, undefined, '失败执行绝对不能生成 effective 观察');
+
+  // 6. 验证：模型自证链拒绝成为核验依据；普通建议为 candidate 状态
+  const selfClaimObs = itemsRun1.find(
+    (i) => i.text.includes('经测试代码完全正确') || i.text.includes('绝对可靠')
+  );
+  assert.equal(selfClaimObs, undefined, '模型自证链语句绝对不能被采纳为事实或决定');
+
+  const candidateExp = itemsRun1.find((i) => i.text.includes('在 CI 中加入 pnpm typecheck'));
+  assert.ok(candidateExp, '助手建议必须被提取为经验');
+  assert.equal(candidateExp.status, 'candidate', '助手建议必须保持 candidate 候选状态');
+
+  // 7. 验证：歧义推荐仍为候选
+  const runId2 = 'run-test-002';
+  const input2: CaptureInput = {
+    runId: runId2,
+    sessionId: 'session-002',
+    workspaceId: 'ws-capture',
+    userInput: '建议未来可能考虑把架构拆成微服务？',
+    messages: [],
+    events: [],
+    environment: { cwd: env.tempDir, runtimeVersion: '1.0.0' },
+  };
+  service.enqueueCapture(ctx, input2);
+  await service.captureQueue.waitForRun(runId2);
+
+  const itemsRun2 = service.listItems(ctx);
+  const ambigItem = itemsRun2.find((i) => i.originRunId === runId2);
+  assert.ok(ambigItem, '歧义输入必须被提取');
+  assert.equal(ambigItem.status, 'candidate', '歧义推荐必须保持 candidate 状态');
+
+  // 8. 验证：条目纠错 (correctItem)
+  const corrected = service.correctItem(
+    ctx,
+    decisionItem.id,
+    '修正为：前端统一严格模式，Node 脚本暂时宽松'
+  );
+  assert.equal(corrected.status, 'effective', '纠错后的新条目必须为 effective');
+  assert.equal(corrected.supersedes, decisionItem.id, '新条目必须记录 supersedes 旧条目 ID');
+
+  const oldItemAfter = store.getKnowledgeItem(decisionItem.id);
+  assert.equal(oldItemAfter?.status, 'invalidated', '被纠正的旧条目必须变为 invalidated');
 });

@@ -142,5 +142,21 @@ export function initKnowledgeSchema(db: Database.Database): void {
       error TEXT,
       created_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS execution_evidence (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      execution_id TEXT NOT NULL,
+      command TEXT NOT NULL,
+      cwd TEXT NOT NULL,
+      exit_code INTEGER,
+      timed_out INTEGER NOT NULL,
+      stdout TEXT NOT NULL,
+      stderr TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_exec_evidence_run ON execution_evidence(run_id);
   `);
 }

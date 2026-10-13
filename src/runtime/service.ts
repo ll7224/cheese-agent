@@ -423,6 +423,42 @@ export class Runtime {
     this.events(run.id).filter(event => event.type === 'child-status').forEach(event => children.set(String(event.childRunId), event));
     for (const [childRunId, event] of children) if (['queued', 'running', 'stopping'].includes(String(event.status))) this.emit(run, { type: 'child-status', childRunId, rootRunId: run.id, parentRunId: run.id, status: controller.signal.aborted ? 'cancelled' : 'error' });
     this.emit(run, { type: 'status', status: run.status, error: run.error });
+
+    // 任务结束后异步触发知识沉淀提取（未完成/取消任务不生成成功观察）
+    if (this.knowledgeService) {
+      try {
+        const allEvents = this.events(run.id);
+        const filteredEvents = run.status === 'completed'
+          ? allEvents
+          : allEvents.filter(e => e.type !== 'execution-evidence');
+
+        const currentModel = session.config?.values?.model?.name;
+        this.knowledgeService.enqueueCapture(
+          {
+            workspaceId: workspace.id,
+            workspacePath: workspace.path,
+            agentId: session.agentId || 'general',
+            runId: run.id,
+            role: 'owner',
+          },
+          {
+            runId: run.id,
+            sessionId: session.id,
+            workspaceId: workspace.id,
+            userInput: run.input || '',
+            messages: session.messages,
+            events: filteredEvents,
+            environment: {
+              cwd: workspace.path,
+              runtimeVersion: '1.0.0',
+              modelName: currentModel,
+            },
+          }
+        );
+      } catch (err) {
+        console.warn('沉淀任务排队异常:', err);
+      }
+    }
   }
 
   stop(id: string) {
