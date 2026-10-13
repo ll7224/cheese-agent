@@ -162,3 +162,44 @@ GET /api/v1/workspaces/:workspaceId/knowledge/citations/:citationId
 - **按需惰性初始化**: 系统移除启动时急迫的 `new SqliteVectorStore('knowledge.db')` 调用。
 - **旧命令兼容**: 仅在 CLI 中显式调用旧版 `/rag` 命令时，才通过 `getLegacyRag()` 惰性连接旧版数据库。
 - **Agent 工具与 Web 路由**: 全面使用新的统一 `KnowledgeService`，彻底避免未经授权的全局 SQLite 句柄污染。
+
+---
+
+## 8. 代码结构索引与局部图谱 (Code Graph)
+
+系统内置基于 TypeScript 6.0.3 AST 的只读语法解析器，提取源码实体（函数、类、接口、类型、箭头函数）与结构关系（`imports`、`exports`、`contains`）：
+- **确定性键名去重**: 实体 ID 格式化为 `${workspaceId}:${path}:${container}:${kind}:${name}`，不同文件中的同名函数绝不发生碰撞合并。
+- **原子事务与孤立边清理**: 文档发布时同步更新代码索引与版本证据。当依赖变更导致代码更新时，失去证据支撑的边自动退出当前生效图谱。
+- **局部图谱查询**: 提供 1 跳（最多 60 节点）与 2 跳（最多 120 节点）的有界 BFS 查询，超限返回 `truncated: true`，且严格遵守租户边界。
+- **SVG 交互与解释注入**: 采用原生 SVG 同心环布局，支持拖拽平移与滚轮缩放；点击“解释代码”可将上下文填入主工作区草稿输入框。
+
+---
+
+## 9. 自动沉淀、知识纠错与候选隔离 (Capture & Items)
+
+### 沉淀条目类型与生命周期
+
+- **kind**: `decision` (用户明确决议)、`observation` (经过验证的命令执行)、`experience` (候选建议与经验)。
+- **status**:
+  - `effective`: 正式生效，被 `fact` 与 `experience` 检索模式同时召回。
+  - `candidate`: 候选状态，仅在 `experience` 检索模式中召回，引用和图谱均带“待验证”标注。
+  - `needs_review` / `invalidated`: 自动退出检索索引。
+- **规则沉淀约束**:
+  - 用户显式决定（无歧义、含决定动词）才生效为 `effective decision`；
+  - 工具命令仅在 `exitCode === 0 && !timedOut` 时生效为环境限定的 `effective observation`；
+  - 模型自证链（“经测试代码完全正确”等）绝不作为核验依据；
+  - reasoning 不参与提取；
+  - 模糊问题与推测性建议保持为 `candidate experience`。
+
+### 知识条目纠错
+
+用户或管理员可在 Web 界面或通过 API 对条目进行纠错：
+```http
+POST /api/v1/workspaces/:workspaceId/knowledge/items/:itemId/correct
+Content-Type: application/json
+
+{
+  "replacement": "纠正后的新结论或规则"
+}
+```
+纠错在单事务内将旧条目标记为 `invalidated`，生成 `status = 'effective'` 的替代新条目，记录 `supersedes` 关联并同步更新向量/FTS 分区与图谱关联边。历史原引用展示“已失效”，正式检索仅返回替代新条目。

@@ -18,6 +18,15 @@ import path from 'node:path';
 
 export type QueryEmbedder = (texts: string[]) => Promise<number[][]>;
 
+export function emptySearchResponse(generation: number = 1): SearchResponse {
+  return {
+    generation,
+    libraryIds: [],
+    hits: [],
+    warnings: [],
+  };
+}
+
 /**
  * 执行范围受限的混合知识检索。
  * 遵循只在当前已授权的库分区内检索、支持 fact 与 experience 模式、并输出可溯源的 Citation。
@@ -41,12 +50,7 @@ export async function executeSearch(
   );
 
   if (allowedLibraryIds.length === 0) {
-    return {
-      generation: store.getGeneration(),
-      libraryIds: [],
-      hits: [],
-      warnings: ['当前上下文无权访问指定或任何知识库'],
-    };
+    return emptySearchResponse(store.getGeneration());
   }
 
   // 区分事实模式与经验模式的状态分区
@@ -56,6 +60,9 @@ export async function executeSearch(
       : ['effective'];
 
   const collectionIds = resolveIndexKeys(allowedLibraryIds, statuses);
+  if (collectionIds.length === 0) {
+    return emptySearchResponse(store.getGeneration());
+  }
 
   // 在 SQLite 读事务前准备查询向量（若配置了 embedding）
   let queryVector: number[] | undefined;
@@ -103,36 +110,95 @@ export async function executeSearch(
       WHERE r.chunk_id = ?
     `);
 
+    const itemStmt = store.db.prepare(`
+      SELECT * FROM knowledge_items
+      WHERE id = ?
+         OR id = ?
+         OR id = REPLACE(?, 'item-chunk-', '')
+         OR id = REPLACE(?, 'chunk-', '')
+         OR ('knowledge-item:' || id) = ?
+         OR text = ?
+    `);
+
     for (const res of rawResults) {
       const meta = stmt.get(res.chunk.id) as any;
-      if (!meta) continue;
+      if (meta) {
+        // 验证检索结果所属的 libraryId 是否在当前授权列表中
+        if (!allowedLibraryIds.includes(meta.library_id)) continue;
 
-      // 验证检索结果所属的 libraryId 是否在当前授权列表中
-      if (!allowedLibraryIds.includes(meta.library_id)) continue;
+        const citation: Citation = {
+          id: meta.ref_id,
+          documentId: meta.document_id,
+          revisionId: meta.revision_id,
+          sourceUri: meta.source_key,
+          span: {
+            startOffset: meta.start_offset,
+            endOffset: meta.end_offset,
+            startLine: meta.start_line,
+            endLine: meta.end_line,
+          },
+          hash: meta.hash,
+          commit: meta.commit_hash || undefined,
+          status: (meta.doc_status as KnowledgeStatus) || 'effective',
+          evidenceKind: meta.evidence_kind || 'document',
+          libraryId: meta.library_id,
+        };
 
-      const citation: Citation = {
-        id: meta.ref_id,
-        documentId: meta.document_id,
-        revisionId: meta.revision_id,
-        sourceUri: meta.source_key,
-        span: {
-          startOffset: meta.start_offset,
-          endOffset: meta.end_offset,
-          startLine: meta.start_line,
-          endLine: meta.end_line,
-        },
-        hash: meta.hash,
-        commit: meta.commit_hash || undefined,
-        status: (meta.doc_status as KnowledgeStatus) || 'effective',
-        evidenceKind: meta.evidence_kind || 'document',
-        libraryId: meta.library_id,
-      };
+        hits.push({
+          text: res.chunk.text,
+          score: res.score,
+          citation,
+        });
+        continue;
+      }
 
-      hits.push({
-        text: res.chunk.text,
-        score: res.score,
-        citation,
-      });
+      // 检查沉淀知识条目
+      const itemRow = itemStmt.get(
+        res.chunk.id,
+        res.chunk.source,
+        res.chunk.id,
+        res.chunk.id,
+        res.chunk.source,
+        res.chunk.text
+      ) as any;
+
+      if (itemRow) {
+        if (!allowedLibraryIds.includes(itemRow.library_id)) continue;
+
+        // fact 模式排除 candidate
+        if (request.mode === 'fact' && itemRow.status === 'candidate') continue;
+        // 两种模式均排除 invalidated 与 needs_review
+        if (itemRow.status === 'invalidated' || itemRow.status === 'needs_review') continue;
+
+        let evidenceKind: any = 'document';
+        if (itemRow.kind === 'decision') evidenceKind = 'decision';
+        else if (itemRow.kind === 'observation') evidenceKind = 'observation';
+
+        const lines = (itemRow.text || '').split('\n');
+        const citation: Citation = {
+          id: `ref-${itemRow.id}`,
+          documentId: itemRow.id,
+          revisionId: `rev-${itemRow.id}`,
+          sourceUri: `knowledge-item:${itemRow.kind}`,
+          span: {
+            startOffset: 0,
+            endOffset: itemRow.text.length,
+            startLine: 1,
+            endLine: lines.length,
+          },
+          hash: crypto.createHash('sha256').update(itemRow.text).digest('hex'),
+          commit: undefined,
+          status: itemRow.status as KnowledgeStatus,
+          evidenceKind,
+          libraryId: itemRow.library_id,
+        };
+
+        hits.push({
+          text: res.chunk.text,
+          score: res.score,
+          citation,
+        });
+      }
     }
 
     return {
@@ -183,6 +249,47 @@ export function getCitationView(
   `).get(citationId, citationId) as any;
 
   if (!row) {
+    const cleanedId = citationId.replace(/^ref-/, '').replace(/^item-chunk-/, '');
+    const itemRow = store.db.prepare(`
+      SELECT * FROM knowledge_items WHERE id = ? OR ('ref-' || id) = ?
+    `).get(cleanedId, citationId) as any;
+
+    if (itemRow) {
+      if (!allowedLibraryIds.includes(itemRow.library_id)) {
+        throw new Error(`Citation access denied: ${citationId}`);
+      }
+      let evidenceKind: any = 'document';
+      if (itemRow.kind === 'decision') evidenceKind = 'decision';
+      else if (itemRow.kind === 'observation') evidenceKind = 'observation';
+
+      const lines = (itemRow.text || '').split('\n');
+      const citation: Citation = {
+        id: citationId,
+        documentId: itemRow.id,
+        revisionId: `rev-${itemRow.id}`,
+        sourceUri: `knowledge-item:${itemRow.kind}`,
+        span: {
+          startOffset: 0,
+          endOffset: itemRow.text.length,
+          startLine: 1,
+          endLine: lines.length,
+        },
+        hash: crypto.createHash('sha256').update(itemRow.text).digest('hex'),
+        commit: undefined,
+        status: itemRow.status as KnowledgeStatus,
+        evidenceKind,
+        libraryId: itemRow.library_id,
+      };
+
+      const isCurrent = itemRow.status === 'effective';
+      return {
+        citation,
+        content: itemRow.text,
+        currentRevisionId: isCurrent ? `rev-${itemRow.id}` : undefined,
+        current: isCurrent,
+      };
+    }
+
     throw new Error(`Citation not found: ${citationId}`);
   }
 

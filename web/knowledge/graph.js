@@ -311,8 +311,8 @@ export class GraphController {
       text.setAttribute('y', midY - 4);
       text.setAttribute('text-anchor', 'middle');
       text.setAttribute('font-size', '10');
-      text.setAttribute('fill', '#64748b');
-      text.textContent = edge.kind;
+      text.setAttribute('fill', isCandidate ? '#d97706' : '#64748b');
+      text.textContent = isCandidate ? `${edge.kind} (待验证)` : edge.kind;
 
       edgeGroup.appendChild(line);
       edgeGroup.appendChild(text);

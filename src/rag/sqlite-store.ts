@@ -310,26 +310,86 @@ export class SqliteVectorStore {
   ): Array<{ chunk: StoredChunk; score: number }> {
     if (collectionIds && collectionIds.length === 0) return [];
 
-    let rows: any[];
-    if (collectionIds && collectionIds.length > 0) {
-      const placeholders = collectionIds.map(() => '?').join(',');
-      rows = this.db.prepare(`
-        SELECT f.id, bm25(chunks_fts) AS rank, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
-        FROM chunks_fts f
-        JOIN chunks c ON c.id = f.id
-        WHERE chunks_fts MATCH ? AND c.collection_id IN (${placeholders})
-        ORDER BY rank
-        LIMIT ?
-      `).all(query, ...collectionIds, topK) as any[];
-    } else {
-      rows = this.db.prepare(`
-        SELECT f.id, bm25(chunks_fts) AS rank, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
-        FROM chunks_fts f
-        JOIN chunks c ON c.id = f.id
-        WHERE chunks_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-      `).all(query, topK) as any[];
+    let rows: any[] = [];
+    try {
+      if (collectionIds && collectionIds.length > 0) {
+        const placeholders = collectionIds.map(() => '?').join(',');
+        rows = this.db.prepare(`
+          SELECT f.id, bm25(chunks_fts) AS rank, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
+          FROM chunks_fts f
+          JOIN chunks c ON c.id = f.id
+          WHERE chunks_fts MATCH ? AND c.collection_id IN (${placeholders})
+          ORDER BY rank
+          LIMIT ?
+        `).all(query, ...collectionIds, topK) as any[];
+      } else {
+        rows = this.db.prepare(`
+          SELECT f.id, bm25(chunks_fts) AS rank, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
+          FROM chunks_fts f
+          JOIN chunks c ON c.id = f.id
+          WHERE chunks_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `).all(query, topK) as any[];
+      }
+    } catch {
+      rows = [];
+    }
+
+    if (rows.length === 0) {
+      // 降级 1: 分词前缀匹配
+      const terms = query.trim().split(/\s+/).filter(Boolean);
+      if (terms.length > 0) {
+        const prefixQuery = terms.map((t) => `${t.replace(/[*"'^:]/g, '')}*`).join(' ');
+        try {
+          if (collectionIds && collectionIds.length > 0) {
+            const placeholders = collectionIds.map(() => '?').join(',');
+            rows = this.db.prepare(`
+              SELECT f.id, bm25(chunks_fts) AS rank, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
+              FROM chunks_fts f
+              JOIN chunks c ON c.id = f.id
+              WHERE chunks_fts MATCH ? AND c.collection_id IN (${placeholders})
+              ORDER BY rank
+              LIMIT ?
+            `).all(prefixQuery, ...collectionIds, topK) as any[];
+          } else {
+            rows = this.db.prepare(`
+              SELECT f.id, bm25(chunks_fts) AS rank, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
+              FROM chunks_fts f
+              JOIN chunks c ON c.id = f.id
+              WHERE chunks_fts MATCH ?
+              ORDER BY rank
+              LIMIT ?
+            `).all(prefixQuery, topK) as any[];
+          }
+        } catch {
+          rows = [];
+        }
+      }
+    }
+
+    if (rows.length === 0) {
+      // 降级 2: LIKE 子串匹配（保障无 CJK 词法分析扩展时的中文字符检索体验）
+      try {
+        if (collectionIds && collectionIds.length > 0) {
+          const placeholders = collectionIds.map(() => '?').join(',');
+          rows = this.db.prepare(`
+            SELECT c.id, -0.5 AS rank, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
+            FROM chunks c
+            WHERE c.text LIKE ? AND c.collection_id IN (${placeholders})
+            LIMIT ?
+          `).all(`%${query.trim()}%`, ...collectionIds, topK) as any[];
+        } else {
+          rows = this.db.prepare(`
+            SELECT c.id, -0.5 AS rank, c.text, c.source, c.chunk_index, c.embedding, c.collection_id
+            FROM chunks c
+            WHERE c.text LIKE ?
+            LIMIT ?
+          `).all(`%${query.trim()}%`, topK) as any[];
+        }
+      } catch {
+        rows = [];
+      }
     }
 
     return rows.map((r) => ({

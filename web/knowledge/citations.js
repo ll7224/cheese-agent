@@ -77,8 +77,12 @@ export async function viewCitation(workspaceId, citationId) {
 function renderCitationDetail(container, data, workspaceId) {
   const { citation, content, currentRevisionId, current } = data;
   const span = citation.span || {};
-  const statusClass = citation.status === 'effective' ? 'status-pill-effective' : 'status-pill-candidate';
-  const statusLabel = citation.status === 'effective' ? '已生效' : '候选经验 (仅供参考)';
+  const statusClass = citation.status === 'effective'
+    ? 'status-pill-effective'
+    : (citation.status === 'invalidated' ? 'status-pill-invalidated' : 'status-pill-candidate');
+  const statusLabel = citation.status === 'effective'
+    ? '已生效'
+    : (citation.status === 'invalidated' ? '已失效 (已由新条目或版本替代)' : '候选 (待验证)');
   const currentBadge = current
     ? '<span class="status-badge-current">● 当前生效版本</span>'
     : `<span class="status-badge-historic">⚠️ 历史版本 (当前生效: ${escapeHtml(currentRevisionId || '无')})</span>`;

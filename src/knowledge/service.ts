@@ -245,11 +245,53 @@ export class KnowledgeService {
     };
 
     const tx = this.store.db.transaction(() => {
+      // 1. 将旧条目标记为 invalidated
       this.store.updateKnowledgeItem(existing.id, {
         status: 'invalidated',
         updatedAt: now,
       });
+
+      // 2. 插入新替代条目
       this.store.createKnowledgeItem(newItem);
+
+      // 3. 更新向量/FTS 索引：旧条目退出，新生效条目加入 effective 分区
+      this.store.vectorStore.removeChunks([
+        `item-chunk-${existing.id}`,
+        `chunk-${existing.id}`,
+        `chunk-${existing.id.replace(/^item-/, '')}`,
+        existing.id,
+      ]);
+      this.store.vectorStore.upsertIndexedChunks([
+        {
+          id: `item-chunk-${newItem.id}`,
+          text: replacement,
+          source: `knowledge-item:${newItem.id}`,
+          chunkIndex: 0,
+          collectionId: `${existing.libraryId}:effective`,
+        },
+      ]);
+
+      // 4. 更新相关边并建立 supersedes 关系
+      this.store.db.prepare(`
+        UPDATE edges SET source_id = ? WHERE source_id = ?
+      `).run(newItem.id, existing.id);
+      this.store.db.prepare(`
+        UPDATE edges SET target_id = ? WHERE target_id = ?
+      `).run(newItem.id, existing.id);
+      this.store.db.prepare(`
+        INSERT OR REPLACE INTO edges (id, source_id, target_id, kind, status, library_id)
+        VALUES (?, ?, ?, 'supersedes', 'effective', ?)
+      `).run(
+        `edge-sup-${newItem.id}-${existing.id}`,
+        newItem.id,
+        existing.id,
+        existing.libraryId
+      );
+
+      // 5. 递增 generation
+      this.store.db.prepare(`
+        UPDATE generation SET version = version + 1 WHERE id = 1
+      `).run();
     });
     tx();
 

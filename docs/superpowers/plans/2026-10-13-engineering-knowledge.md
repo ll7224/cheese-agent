@@ -392,8 +392,8 @@ const record = (evidence: CommandEvidence) =>
 
 **Files:** Modify libraries.ts、retriever.ts、service.ts、knowledge-routes.ts、web/knowledge/views.js、citations.js、graph.js、docs/engineering-knowledge.md。
 
-- [ ] GET /api/v1/workspaces/:id/knowledge/items 分页列出状态、来源和适用范围；页面提供候选/生效/待复核/失效筛选、证据查看、编辑纠正和明确分享操作。
-- [ ] fact 模式只构造 effective 内部分区；experience 才加入 candidate 分区。needs_review/invalidated 默认退出，两种模式都不能悄悄恢复。所有候选引用带“待验证”文字，关系显示虚线及状态。
+- [x] GET /api/v1/workspaces/:id/knowledge/items 分页列出状态、来源和适用范围；页面提供候选/生效/待复核/失效筛选、证据查看、编辑纠正和明确分享操作。
+- [x] fact 模式只构造 effective 内部分区；experience 才加入 candidate 分区。needs_review/invalidated 默认退出，两种模式都不能悄悄恢复。所有候选引用带“待验证”文字，关系显示虚线及状态。
 
 ```ts
 const statuses: KnowledgeStatus[] =
@@ -404,8 +404,8 @@ if (indexKeys.length === 0) return emptySearchResponse();
 
 resolveIndexKeys 定义在 libraries.ts，将服务已允许库 ID 和状态映射到内部 collection_id；emptySearchResponse 返回当前 generation、空 hits、实际空库列表。
 
-- [ ] 纠错在单事务内使旧条目 invalidated、更新向量/FTS、建立 supersedes/invalidates，并更新相关边；历史原引用仍展示“已失效”，正式检索只返回替代条目。
-- [ ] P2 集中运行一次构建与工程场景；若 bash 抽取改变了现有工具返回，再补跑 tool-integration.test.ts，否则不扩大。
+- [x] 纠错在单事务内使旧条目 invalidated、更新向量/FTS、建立 supersedes/invalidates，并更新相关边；历史原引用仍展示“已失效”，正式检索只返回替代条目。
+- [x] P2 集中运行一次构建与工程场景；若 bash 抽取改变了现有工具返回，再补跑 tool-integration.test.ts，否则不扩大。
 
 ```sh
 npm run build
