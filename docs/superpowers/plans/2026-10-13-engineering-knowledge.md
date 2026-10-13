@@ -239,8 +239,8 @@ createKnowledgeTools(rpc: KnowledgeRpc): ToolDefinition[];
 
 CitationView 为 { citation, content, currentRevisionId?, current:boolean }。Library 过滤规则由 libraries.ts 的 resolveLibraries(ctx, query, requestedIds?) 实现，返回可访问 ID 列表；indexKeys 只在服务内部计算。
 
-- [ ] Runtime 持有 KnowledgeService，初始化后 attach 已接入工作区，新增工作区时注册；close 在停止 workers 后关闭知识服务。会话 state.json 维持原结构，索引存在独立 DB。
-- [ ] Execution 与 ExecutionOptions 增加 knowledge?: KnowledgeRpc，worker 使用知识 request/result 消息和独立 pending map。首次消息在 import main.ts 前声明 IPC transport，main 顶层不再构造旧 RAG DB。
+- [x] Runtime 持有 KnowledgeService，初始化后 attach 已接入工作区，新增工作区时注册；close 在停止 workers 后关闭知识服务。会话 state.json 维持原结构，索引存在独立 DB。
+- [x] Execution 与 ExecutionOptions 增加 knowledge?: KnowledgeRpc，worker 使用知识 request/result 消息和独立 pending map。首次消息在 import main.ts 前声明 IPC transport，main 顶层不再构造旧 RAG DB。
 
 ```ts
 // 主进程：可信上下文来自当前执行闭包。
