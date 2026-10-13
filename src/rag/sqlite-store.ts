@@ -17,17 +17,35 @@ import { mmrSelect, type SearchResult } from './search.js';
 export class SqliteVectorStore {
   /** Better-SQLite3 原生数据库连接句柄 */
   private db: Database.Database;
+  private ownsDb: boolean = true;
 
   /**
    * 初始化数据库并挂载 sqlite-vec 向量扩展插件。
    *
-   * @param dbPath SQLite 数据库文件路径（默认保存在当前目录的 'knowledge.db'）
+   * @param dbOrPath SQLite 数据库文件路径或已有连接
    */
-  constructor(dbPath: string = 'knowledge.db') {
-    this.db = new Database(dbPath);
+  constructor(dbOrPath: string | Database.Database = 'knowledge.db') {
+    if (typeof dbOrPath === 'string') {
+      this.db = new Database(dbOrPath);
+      this.ownsDb = true;
+    } else {
+      this.db = dbOrPath;
+      this.ownsDb = false;
+    }
     // 加载 sqlite-vec 动态扩展库，赋予 SQLite 向量计算与 vec0 虚拟表支持能力
-    sqliteVec.load(this.db);
+    try {
+      sqliteVec.load(this.db);
+    } catch {
+      // 若已加载则忽略
+    }
     this.createTables();
+  }
+
+  /** 关闭自身持有的数据库连接 */
+  close(): void {
+    if (this.ownsDb) {
+      this.db.close();
+    }
   }
 
   /**
@@ -141,6 +159,77 @@ export class SqliteVectorStore {
       }
     });
     tx(); // 执行事务提交
+  }
+
+  /**
+   * 写入/更新知识索引片段。
+   * 当 embedding 缺省或为空时写入元数据及 FTS，清除旧 vec 项，不插入零向量。
+   */
+  upsertIndexedChunks(
+    items: Array<{
+      id: string;
+      text: string;
+      source: string;
+      chunkIndex: number;
+      collectionId: string;
+      embedding?: number[];
+    }>
+  ): void {
+    const now = Date.now();
+    const insertChunk = this.db.prepare(`
+      INSERT OR REPLACE INTO chunks
+        (id, text, source, chunk_index, embedding, collection_id, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const deleteVec = this.db.prepare(`DELETE FROM chunks_vec WHERE id = ?`);
+    const insertVec = this.db.prepare(`
+      INSERT INTO chunks_vec (id, embedding)
+      VALUES (?, ?)
+    `);
+    const deleteFts = this.db.prepare(`DELETE FROM chunks_fts WHERE id = ?`);
+    const insertFts = this.db.prepare(`
+      INSERT INTO chunks_fts (id, text, source)
+      VALUES (?, ?, ?)
+    `);
+
+    for (const item of items) {
+      const hasVec = Array.isArray(item.embedding) && item.embedding.length > 0;
+      insertChunk.run(
+        item.id,
+        item.text,
+        item.source,
+        item.chunkIndex,
+        hasVec ? JSON.stringify(item.embedding) : '[]',
+        item.collectionId,
+        now
+      );
+
+      deleteVec.run(item.id);
+      if (hasVec) {
+        insertVec.run(
+          item.id,
+          Buffer.from(new Float32Array(item.embedding!).buffer)
+        );
+      }
+
+      deleteFts.run(item.id);
+      insertFts.run(item.id, item.text, item.source);
+    }
+  }
+
+  /**
+   * 按 ID 列表删除切片及对应的向量、全文索引。
+   */
+  removeChunks(ids: string[]): void {
+    if (ids.length === 0) return;
+    const deleteChunk = this.db.prepare(`DELETE FROM chunks WHERE id = ?`);
+    const deleteVec = this.db.prepare(`DELETE FROM chunks_vec WHERE id = ?`);
+    const deleteFts = this.db.prepare(`DELETE FROM chunks_fts WHERE id = ?`);
+    for (const id of ids) {
+      deleteChunk.run(id);
+      deleteVec.run(id);
+      deleteFts.run(id);
+    }
   }
 
   /**
@@ -342,26 +431,42 @@ export class SqliteVectorStore {
    * @param topK 最终需要返回的结果数量（默认 5）
    * @param collectionIds 可选指定的集合范围过滤列表
    */
-  async hybridSearch(
-    embedFn: EmbeddingFn,
+  /**
+   * 同步混合检索核心入口：根据已就绪的 query 和可选 vector 执行检索与加权融合。
+   *
+   * @param query 搜索关键词/语句
+   * @param vector 可选查询向量
+   * @param topK 最终需要返回的结果数量（默认 5）
+   * @param collectionIds 可选指定的集合范围过滤列表
+   */
+  searchPrepared(
     query: string,
+    vector?: number[],
     topK: number = 5,
     collectionIds?: string[]
-  ): Promise<SearchResult[]> {
+  ): SearchResult[] {
     if (collectionIds && collectionIds.length === 0) return [];
 
     const total = this.size(collectionIds);
     const candidateCount = Math.min(topK * 4, total);
     if (candidateCount === 0) return [];
 
-    // 计算 Query 向量
-    const [queryVec] = await embed(embedFn, [query]);
+    const hasVec = Array.isArray(vector) && vector.length > 0;
+    const hasQuery = Boolean(query && query.trim().length > 0);
 
     // 路径 1: sqlite-vec 密集向量检索
-    const vectorResults = this.vectorSearch(queryVec, candidateCount, collectionIds);
+    const vectorResults = hasVec
+      ? this.vectorSearch(vector!, candidateCount, collectionIds)
+      : [];
 
     // 路径 2: FTS5 稀疏关键词检索
-    const keywordResults = this.keywordSearch(query, candidateCount, collectionIds);
+    const keywordResults = hasQuery
+      ? this.keywordSearch(query, candidateCount, collectionIds)
+      : [];
+
+    if (vectorResults.length === 0 && keywordResults.length === 0) {
+      return [];
+    }
 
     // 双路分数 Min-Max 归一化
     const vecScores = normalizeMinMax(vectorResults.map((r) => r.score));
@@ -370,30 +475,50 @@ export class SqliteVectorStore {
     // 加权外连接合并候选池
     const candidates = new Map<string, SearchResult>();
 
-    // 放入向量路结果
-    for (let i = 0; i < vectorResults.length; i++) {
-      const id = vectorResults[i].chunk.id;
-      candidates.set(id, {
-        chunk: vectorResults[i].chunk,
-        score: vecScores[i] * 0.7,
-        vectorScore: vecScores[i],
-        keywordScore: 0,
-      });
-    }
+    if (hasVec && hasQuery) {
+      // 放入向量路结果 (70%)
+      for (let i = 0; i < vectorResults.length; i++) {
+        const id = vectorResults[i].chunk.id;
+        candidates.set(id, {
+          chunk: vectorResults[i].chunk,
+          score: vecScores[i] * 0.7,
+          vectorScore: vecScores[i],
+          keywordScore: 0,
+        });
+      }
 
-    // 融合关键词路结果
-    for (let i = 0; i < keywordResults.length; i++) {
-      const id = keywordResults[i].chunk.id;
-      const existing = candidates.get(id);
-      if (existing) {
-        // 双路重合项，累加关键词加权分
-        existing.keywordScore = kwScores[i];
-        existing.score += kwScores[i] * 0.3;
-      } else {
-        // 纯关键词命中项，追加为候选
+      // 融合关键词路结果 (30%)
+      for (let i = 0; i < keywordResults.length; i++) {
+        const id = keywordResults[i].chunk.id;
+        const existing = candidates.get(id);
+        if (existing) {
+          existing.keywordScore = kwScores[i];
+          existing.score += kwScores[i] * 0.3;
+        } else {
+          candidates.set(id, {
+            chunk: keywordResults[i].chunk,
+            score: kwScores[i] * 0.3,
+            vectorScore: 0,
+            keywordScore: kwScores[i],
+          });
+        }
+      }
+    } else if (hasVec) {
+      for (let i = 0; i < vectorResults.length; i++) {
+        const id = vectorResults[i].chunk.id;
+        candidates.set(id, {
+          chunk: vectorResults[i].chunk,
+          score: vecScores[i],
+          vectorScore: vecScores[i],
+          keywordScore: 0,
+        });
+      }
+    } else {
+      for (let i = 0; i < keywordResults.length; i++) {
+        const id = keywordResults[i].chunk.id;
         candidates.set(id, {
           chunk: keywordResults[i].chunk,
-          score: kwScores[i] * 0.3,
+          score: kwScores[i],
           vectorScore: 0,
           keywordScore: kwScores[i],
         });
@@ -405,6 +530,25 @@ export class SqliteVectorStore {
 
     // MMR 多样性筛选去重
     return mmrSelect(sorted, topK);
+  }
+
+  /**
+   * 混合搜索核心入口：在持久化数据库层直接编排“向量 + 关键词”双路召回与融合重排。
+   *
+   * @param embedFn 向量化模型函数
+   * @param query 搜索关键词/语句
+   * @param topK 最终需要返回的结果数量（默认 5）
+   * @param collectionIds 可选指定的集合范围过滤列表
+   */
+  async hybridSearch(
+    embedFn: EmbeddingFn,
+    query: string,
+    topK: number = 5,
+    collectionIds?: string[]
+  ): Promise<SearchResult[]> {
+    if (collectionIds && collectionIds.length === 0) return [];
+    const [queryVec] = await embed(embedFn, [query]);
+    return this.searchPrepared(query, queryVec, topK, collectionIds);
   }
 }
 

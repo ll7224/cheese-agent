@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { AgentManifestSchema, type AgentDefinition } from './manifest.js';
+export type { AgentDefinition };
 
 /** 默认存放 Agents 的根目录名 */
 export const AGENTS_DIR = '.agents';

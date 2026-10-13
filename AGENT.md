@@ -59,3 +59,11 @@
 When fulfilling a delete request, prefer a verified Windows Recycle Bin operation instead of commands that delete permanently, such as `Remove-Item`, `del`,  `rm` or `rd`. Use permanent deletion only when the user explicitly asks to erase the files completely or says they never want to see any trace of them again.
 
 Before large-scale file deletion or movement, preview the affected file list with a dry run or an explicit operation plan, then proceed after confirmation. Do not add this extra confirmation step for small, obvious operations involving only one or two files.
+
+## 6. 最小必要验证（用户要求，2026-10-13）
+
+- 尽量减少验证投入，后续开发持续遵守；只检查本次改动的关键行为和实际风险，通过后停止。
+- 不为小型、可逆改动或内部实现细节新增测试，不默认进行全量测试、多轮审查、性能压测或浏览器矩阵。
+- 每阶段集中执行一次相关测试和一次构建；失败后仅重跑受影响项，出现具体风险才扩大范围。
+- 数据更新/删除一致性、项目范围隔离、执行状态等关键行为保留针对性检查；共享 Runtime/worker 接口变动仅补跑相关现有测试。
+- 文档或计划修改只做一次内容、链接和差异检查，不运行应用测试；用户的验证投入要求优先于技能默认的逐任务 TDD 和审查模板。

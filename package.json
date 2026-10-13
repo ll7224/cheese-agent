@@ -22,6 +22,7 @@
 		"@larksuiteoapi/node-sdk": "^1.73.3",
 		"ai": "7.0.91",
 		"better-sqlite3": "^13.0.3",
+		"chokidar": "^4.0.3",
 		"croner": "^10.0.1",
 		"dotenv": "^17.4.2",
 		"fast-glob": "^3.3.3",
@@ -29,6 +30,7 @@
 		"http-server": "^14.1.1",
 		"sqlite-vec": "^0.1.9",
 		"turndown": "^7.2.4",
+		"typescript": "^6.0.3",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {
@@ -37,7 +39,6 @@
 		"@types/json-schema": "7.0.15",
 		"@types/node": "^26.0.1",
 		"@types/turndown": "^5.0.6",
-		"tsx": "^4.22.4",
-		"typescript": "^6.0.3"
+		"tsx": "^4.22.4"
 	}
 }
