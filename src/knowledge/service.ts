@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import crypto, { randomUUID } from 'node:crypto';
+import Database from 'better-sqlite3';
 import { KnowledgeStore } from './store.js';
 import { LocalSyncManager, type EmbeddingFn } from './local-sync.js';
 import { discoverWorkspaceSources } from './sources.js';
@@ -12,6 +13,13 @@ import {
 } from './retriever.js';
 import { queryGraph } from './graph.js';
 import { CaptureQueue, type CaptureInput } from './capture.js';
+import {
+  Context7Provider,
+  FirecrawlProvider,
+  syncProviderSource,
+  getProviderStatus,
+} from './providers.js';
+import { chunkWithSpans } from './chunks.js';
 import type {
   KnowledgeContext,
   SourceProposal,
@@ -151,6 +159,8 @@ export class KnowledgeService {
       // 首次启用扫描并建立 watcher；扫描与 watcher ready 后补一次差异同步
       await this.localSync.startWatch(enabledSource, ctx.workspacePath);
       await this.localSync.syncSource(enabledSource, ctx.workspacePath);
+    } else if (enabledSource.kind === 'context7' || enabledSource.kind === 'firecrawl') {
+      await this.syncSource(ctx, sourceId);
     }
   }
 
@@ -165,6 +175,171 @@ export class KnowledgeService {
 
     if (source.kind === 'local') {
       await this.localSync.syncSource(source, ctx.workspacePath);
+    } else if (source.kind === 'context7') {
+      const provider = new Context7Provider();
+      await syncProviderSource(this.store, source, provider);
+    } else if (source.kind === 'firecrawl') {
+      const provider = new FirecrawlProvider();
+      await syncProviderSource(this.store, source, provider);
+    }
+  }
+
+  /**
+   * 手动导入旧版 RAG 知识库：
+   * 仅读取旧 chunks/source/collection，复制到当前项目 legacy 库；
+   * source 可读取时重新生成精确 span，不能读取时保留旧文本；
+   * 旧库绝不清空，保持原样。
+   */
+  async importLegacyDatabase(
+    ctx: KnowledgeContext,
+    legacyDbPath?: string
+  ): Promise<{ importedDocuments: number; importedChunks: number; legacyLibraryId: string }> {
+    const targetDbPath = legacyDbPath || path.join(ctx.workspacePath, '.cheese-knowledge', 'knowledge.db');
+    if (!fs.existsSync(targetDbPath)) {
+      throw new Error(`未找到旧版知识库文件: ${targetDbPath}`);
+    }
+
+    const legacyDb = new Database(targetDbPath, { readonly: true });
+    try {
+      const tableCheck = legacyDb.prepare(`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='chunks'
+      `).get();
+      if (!tableCheck) {
+        throw new Error('旧版数据库缺少 chunks 表，无法导入');
+      }
+
+      const rows = legacyDb.prepare(`
+        SELECT id, text, source, chunk_index, collection_id FROM chunks
+      `).all() as Array<{
+        id: string;
+        text: string;
+        source: string;
+        chunk_index: number;
+        collection_id?: string;
+      }>;
+
+      if (rows.length === 0) {
+        return { importedDocuments: 0, importedChunks: 0, legacyLibraryId: '' };
+      }
+
+      const legacyLibId = `project:${ctx.workspaceId}:legacy`;
+      if (!this.store.getLibrary(legacyLibId)) {
+        this.store.createLibrary({
+          id: legacyLibId,
+          name: `Legacy Imported Knowledge (${ctx.workspaceId})`,
+          description: '从旧版 RAG 知识库迁移导入的工程资料',
+          scope: 'project',
+          workspaceId: ctx.workspaceId,
+          role: 'project',
+        });
+      }
+
+      const sourceId = `src-legacy-${ctx.workspaceId}`;
+      let source = this.store.getSource(sourceId);
+      if (!source) {
+        source = this.store.createSource({
+          id: sourceId,
+          libraryId: legacyLibId,
+          kind: 'managed',
+          locator: 'legacy-import',
+          enabled: true,
+        });
+      }
+
+      // 按 source 聚合文档
+      const docsMap = new Map<string, Array<{ id: string; text: string; chunk_index: number }>>();
+      for (const r of rows) {
+        const sKey = r.source || 'unspecified';
+        const list = docsMap.get(sKey) || [];
+        list.push(r);
+        docsMap.set(sKey, list);
+      }
+
+      let importedDocuments = 0;
+      let importedChunks = 0;
+
+      for (const [sourceKey, chunkList] of docsMap.entries()) {
+        chunkList.sort((a, b) => a.chunk_index - b.chunk_index);
+
+        let diskContent: string | null = null;
+        const candidateDiskPath = path.isAbsolute(sourceKey)
+          ? sourceKey
+          : path.join(ctx.workspacePath, sourceKey);
+        if (fs.existsSync(candidateDiskPath)) {
+          try {
+            diskContent = fs.readFileSync(candidateDiskPath, 'utf-8');
+          } catch {
+            diskContent = null;
+          }
+        }
+
+        if (diskContent) {
+          const rawChunks = chunkWithSpans(diskContent);
+          const hash = crypto.createHash('sha256').update(diskContent).digest('hex');
+          const existing = this.store.getDocument(source.id, sourceKey);
+
+          this.store.publishRevision({
+            sourceId: source.id,
+            sourceKey,
+            content: diskContent,
+            hash,
+            expectedPreviousRevisionId: existing?.activeRevisionId || null,
+            chunks: rawChunks.map((c) => ({
+              text: c.text,
+              span: c.span,
+              evidenceKind: 'document',
+            })),
+          });
+          importedChunks += rawChunks.length;
+        } else {
+          const combinedText = chunkList.map((c) => c.text).join('\n\n');
+          const hash = crypto.createHash('sha256').update(combinedText).digest('hex');
+          const existing = this.store.getDocument(source.id, sourceKey);
+
+          let curOffset = 0;
+          let curLine = 1;
+          const chunkDrafts = chunkList.map((c) => {
+            const startOffset = curOffset;
+            const endOffset = curOffset + c.text.length;
+            const lineCount = c.text.split('\n').length;
+            const startLine = curLine;
+            const endLine = curLine + lineCount - 1;
+            curOffset = endOffset + 2;
+            curLine = endLine + 2;
+
+            return {
+              text: c.text,
+              span: {
+                startOffset,
+                endOffset,
+                startLine,
+                endLine,
+              },
+              evidenceKind: 'document' as const,
+            };
+          });
+
+          this.store.publishRevision({
+            sourceId: source.id,
+            sourceKey,
+            content: combinedText,
+            hash,
+            expectedPreviousRevisionId: existing?.activeRevisionId || null,
+            chunks: chunkDrafts,
+          });
+          importedChunks += chunkDrafts.length;
+        }
+
+        importedDocuments++;
+      }
+
+      return {
+        importedDocuments,
+        importedChunks,
+        legacyLibraryId: legacyLibId,
+      };
+    } finally {
+      legacyDb.close();
     }
   }
 

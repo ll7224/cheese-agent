@@ -109,6 +109,7 @@ export function buildKnowledgeShell() {
             <span class="toolbar-stat" id="kn-sources-count">已配置来源</span>
           </div>
           <div class="toolbar-right">
+            <button id="kn-import-legacy-btn" class="mini-text-btn" type="button" style="margin-right: 8px;">📥 导入旧版知识库</button>
             <button id="kn-add-source-btn" class="action-tag-btn" type="button">＋ 添加来源</button>
           </div>
         </div>
@@ -128,6 +129,15 @@ export function buildKnowledgeShell() {
               <tr><td colspan="6" class="table-empty">加载中…</td></tr>
             </tbody>
           </table>
+        </div>
+
+        <div class="providers-status-section" style="margin-top: 1rem; padding: 0.75rem 1rem; background: var(--bg-secondary, #252529); border-radius: 6px; font-size: 0.85rem; display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; gap: 1.5rem; align-items: center;">
+            <span style="font-weight: 500; color: var(--text-secondary, #a1a1aa);">公共来源提供方:</span>
+            <span id="kn-status-context7">Context7: <span class="kn-badge-pending">检测中…</span></span>
+            <span id="kn-status-firecrawl">Firecrawl: <span class="kn-badge-pending">检测中…</span></span>
+          </div>
+          <span style="color: var(--text-muted, #71717a); font-size: 0.75rem;">（通过 CONTEXT7_API_KEY / FIRECRAWL_API_KEY 环境变量开启）</span>
         </div>
 
         <div class="discovery-section">

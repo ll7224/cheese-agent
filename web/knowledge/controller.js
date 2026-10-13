@@ -122,6 +122,32 @@ export class KnowledgeController {
       this.loadDiscoveries();
     });
 
+    // 导入旧版知识库
+    const importLegacyBtn = c.querySelector('#kn-import-legacy-btn');
+    if (importLegacyBtn) {
+      importLegacyBtn.addEventListener('click', async () => {
+        const pathInput = prompt('请输入旧版 SQLite 知识库路径（留空则默认读取 .cheese-knowledge/knowledge.db）：', '');
+        if (pathInput === null) return;
+        importLegacyBtn.disabled = true;
+        importLegacyBtn.textContent = '导入中…';
+        try {
+          const res = await this.fetchApi('/legacy/import', {
+            method: 'POST',
+            body: pathInput.trim() ? { legacyDbPath: pathInput.trim() } : {},
+          });
+          alert(`旧版知识库导入完成！\n已导入文档: ${res.importedDocuments} 篇\n已导入切片: ${res.importedChunks} 个\n目标库: ${res.legacyLibraryId}`);
+          await this.loadLibraries();
+          await this.loadSources();
+          await this.loadDocuments();
+        } catch (err) {
+          alert('导入旧版知识库失败: ' + err.message);
+        } finally {
+          importLegacyBtn.disabled = false;
+          importLegacyBtn.textContent = '📥 导入旧版知识库';
+        }
+      });
+    }
+
     // 沉淀与经验
     const filterStatus = c.querySelector('#kn-items-filter-status');
     if (filterStatus) {
@@ -240,6 +266,8 @@ export class KnowledgeController {
   async loadSources() {
     const tbody = this.container.querySelector('#kn-sources-tbody');
     tbody.innerHTML = '<tr><td colspan="6" class="table-empty">加载中…</td></tr>';
+
+    this.loadProviderStatus();
 
     try {
       const sources = await this.fetchApi(
@@ -776,6 +804,22 @@ export class KnowledgeController {
     }
   }
 
+  async loadProviderStatus() {
+    try {
+      const status = await this.fetchApi('/providers');
+      const c7 = this.container.querySelector('#kn-status-context7');
+      const fc = this.container.querySelector('#kn-status-firecrawl');
+      if (c7) {
+        c7.innerHTML = `Context7: <span class="${status.context7 ? 'sync-ready' : 'sync-error'}">${status.context7 ? '✓ 可用' : '未配置'}</span>`;
+      }
+      if (fc) {
+        fc.innerHTML = `Firecrawl: <span class="${status.firecrawl ? 'sync-ready' : 'sync-error'}">${status.firecrawl ? '✓ 可用' : '未配置'}</span>`;
+      }
+    } catch {
+      // 忽略检查异常
+    }
+  }
+
   showAddSourceDialog() {
     const root = this.container.querySelector('#kn-dialogs-root');
     root.innerHTML = `
@@ -797,6 +841,8 @@ export class KnowledgeController {
             <select id="kn-source-kind" class="form-select">
               <option value="local">本地工作区相对目录或文件 (local)</option>
               <option value="managed">受管文档源 (managed)</option>
+              <option value="context7">Context7 公共文档 (context7)</option>
+              <option value="firecrawl">Firecrawl 网页爬取 (firecrawl)</option>
             </select>
           </div>
           <div class="form-row">

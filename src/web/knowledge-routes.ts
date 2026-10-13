@@ -6,6 +6,7 @@ import type { KnowledgeContext, SearchRequest } from '../knowledge/types.js';
 import { bindAgentLibraries, getAgentLibraryIds, resolveLibraries } from '../knowledge/libraries.js';
 import { chunkWithSpans } from '../knowledge/chunks.js';
 import { getExecutionEvidence } from '../knowledge/evidence.js';
+import { getProviderStatus, Context7Provider } from '../knowledge/providers.js';
 
 export function createKnowledgeRoutes(runtime: Runtime): Hono {
   const routes = new Hono();
@@ -563,6 +564,44 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
       throw new RuntimeError('执行证据不存在', 404);
     }
     return context.json(evidence);
+  });
+
+  // 18. GET /api/v1/workspaces/:id/knowledge/providers
+  routes.get('/api/v1/workspaces/:id/knowledge/providers', (context) => {
+    getContext(context.req.param('id'));
+    return context.json(getProviderStatus());
+  });
+
+  // 19. POST /api/v1/workspaces/:id/knowledge/providers/context7/preview
+  routes.post('/api/v1/workspaces/:id/knowledge/providers/context7/preview', async (context) => {
+    getContext(context.req.param('id'));
+    const body = await context.req.json();
+    if (!body.query || typeof body.query !== 'string') {
+      return context.json({ error: 'query 必填' }, 400);
+    }
+    const provider = new Context7Provider();
+    try {
+      const results = await provider.preview({
+        query: body.query,
+        library: body.library,
+        version: body.version,
+      });
+      return context.json(results);
+    } catch (err: any) {
+      throw new RuntimeError(err.message || 'Context7 预览请求失败', 502);
+    }
+  });
+
+  // 20. POST /api/v1/workspaces/:id/knowledge/legacy/import
+  routes.post('/api/v1/workspaces/:id/knowledge/legacy/import', async (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const body = (await context.req.json().catch(() => ({}))) as any;
+    try {
+      const result = await runtime.knowledgeService.importLegacyDatabase(ctx, body.legacyDbPath);
+      return context.json(result);
+    } catch (err: any) {
+      throw new RuntimeError(err.message || '旧版知识库导入失败', 400);
+    }
   });
 
   return routes;

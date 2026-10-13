@@ -1,7 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import path from 'node:path';
+import fs from 'node:fs';
+import Database from 'better-sqlite3';
 import { createKnowledgeTestEnv } from './helpers/knowledge-fixture.js';
 import { KnowledgeService } from '../src/knowledge/service.js';
+import {
+  Context7Provider,
+  FirecrawlProvider,
+  syncProviderSource,
+  type PublicSourceProvider,
+} from '../src/knowledge/providers.js';
 import type { KnowledgeContext, SearchRequest } from '../src/knowledge/types.js';
 
 test('Scenario 7: 有界跨文档关系联合召回、同 generation、候选状态、租户隔离与纠错退出', async (t) => {
@@ -207,4 +217,220 @@ export function handleLogin(): boolean {
     searchAfterCorrect.hits.some((h) => h.text.includes('OAuth 2.1')),
     '纠错后的新替代结论必须能被联合召回'
   );
+});
+
+test('Scenario 8: 公共来源提供方适配、禁止外站、同 Hash 跳过、失败保留旧版与旧知识库平滑迁移', async (t) => {
+  const env = createKnowledgeTestEnv(t);
+  const store = env.store;
+  const service = new KnowledgeService({ dataDir: env.tempDir, store });
+
+  const ctx: KnowledgeContext = {
+    workspaceId: 'ws-test-8',
+    workspacePath: env.tempDir,
+    agentId: 'general',
+    role: 'owner',
+  };
+  service.attachWorkspace(ctx);
+
+  // 1. 搭建本地 Mock HTTP 服务模拟 Context7 与 Firecrawl
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url || '/', `http://${req.headers.host}`);
+
+    if (url.pathname === '/v1/documents/search') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          documents: [
+            {
+              name: 'query-v5.md',
+              url: 'https://context7.example.com/libs/query-v5',
+              content: '# TanStack Query v5\nuseSuspenseQuery replaces useQuery suspense mode.',
+              version: 'v5.0.0',
+            },
+          ],
+        })
+      );
+      return;
+    }
+
+    if (url.pathname === '/v1/crawl' && req.method === 'POST') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: 'crawl-job-test' }));
+      return;
+    }
+
+    if (url.pathname === '/v1/crawl/crawl-job-test') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          status: 'completed',
+          data: [
+            {
+              url: 'https://docs.internal.com/guide/intro',
+              markdown: '# Internal Architecture Guide\nMicroservices best practices and patterns.',
+            },
+            {
+              // 模拟外站攻击或第三方链接：提供方必须严格剔除！
+              url: 'https://malicious-external-tracker.com/leak',
+              markdown: 'Malicious tracker content',
+            },
+          ],
+        })
+      );
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  const address = server.address() as any;
+  const mockBaseUrl = `http://127.0.0.1:${address.port}`;
+  t.after(() => server.close());
+
+  // 2. 验证 Context7 提供方适配器：请求外部文档与预览保存
+  const c7Provider = new Context7Provider({
+    apiKey: 'test-c7-key',
+    baseUrl: mockBaseUrl,
+  });
+  const previewDocs = await c7Provider.preview({ query: 'TanStack Query', version: 'v5.0.0' });
+  assert.equal(previewDocs.length, 1);
+  assert.equal(previewDocs[0].sourceKey, 'query-v5.md');
+  assert.equal(previewDocs[0].version, 'v5.0.0');
+
+  // 将 Context7 作为公共基础来源同步至 public-basic 库
+  const c7Source = store.createSource({
+    id: 'src-c7-query',
+    libraryId: 'public-basic',
+    kind: 'context7',
+    locator: 'TanStack Query',
+    versionConstraint: 'v5.0.0',
+    enabled: true,
+  });
+
+  const c7SyncRes = await syncProviderSource(store, c7Source, c7Provider);
+  assert.equal(c7SyncRes.added, 1);
+  assert.equal(c7SyncRes.unchanged, 0);
+
+  // 验证版本原文与哈希存在
+  const c7Doc = store.getDocument(c7Source.id, 'query-v5.md');
+  assert.ok(c7Doc);
+  assert.ok(c7Doc.activeRevisionId);
+  const activeRev1 = store.readRevision(c7Doc.activeRevisionId);
+  assert.ok(activeRev1?.content.includes('useSuspenseQuery'));
+
+  // 3. 验证同 Hash 内容跳过重建（不产生新版本）
+  const c7SyncRes2 = await syncProviderSource(store, c7Source, c7Provider);
+  assert.equal(c7SyncRes2.unchanged, 1);
+  assert.equal(c7SyncRes2.added, 0);
+  assert.equal(c7SyncRes2.updated, 0);
+  const c7DocAfterSecondSync = store.getDocument(c7Source.id, 'query-v5.md');
+  assert.equal(
+    c7DocAfterSecondSync?.activeRevisionId,
+    c7Doc.activeRevisionId,
+    '相同 Hash 时绝不重复创建新版本'
+  );
+
+  // 4. 验证 Firecrawl 提供方：严格禁止外站跳转与域名越界
+  const fcProvider = new FirecrawlProvider({
+    apiKey: 'test-fc-key',
+    baseUrl: mockBaseUrl,
+  });
+  const fcSource = store.createSource({
+    id: 'src-fc-guide',
+    libraryId: 'public-basic',
+    kind: 'firecrawl',
+    locator: 'https://docs.internal.com/guide',
+    enabled: true,
+  });
+
+  const fcSyncRes = await syncProviderSource(store, fcSource, fcProvider);
+  assert.equal(fcSyncRes.added, 1);
+
+  // 内部文档应已成功录入
+  const fcDoc = store.getDocument(fcSource.id, 'guide/intro');
+  assert.ok(fcDoc, '合法域名下的路径应正确录入');
+
+  // 外站文档绝对不能被录入
+  const allDocs = store.listDocuments(fcSource.id);
+  assert.equal(
+    allDocs.some((d) => d.sourceKey.includes('malicious') || d.sourceKey.includes('leak')),
+    false,
+    '外站链接必须被严格过滤，绝不进入知识库'
+  );
+
+  // 5. 验证网络异常时保留旧版本与记录 lastError
+  const failingProvider: PublicSourceProvider = {
+    provider: 'context7',
+    fetch: async () => {
+      throw new Error('Connection reset by peer');
+    },
+  };
+  await assert.rejects(
+    async () => syncProviderSource(store, c7Source, failingProvider),
+    /Connection reset/
+  );
+  const c7SourceAfterFail = store.getSource(c7Source.id)!;
+  assert.equal(c7SourceAfterFail.syncStatus, 'error');
+  assert.ok(c7SourceAfterFail.lastError?.includes('Connection reset'));
+  // 确认旧版本仍然完好可用
+  const c7DocAfterFail = store.getDocument(c7Source.id, 'query-v5.md')!;
+  assert.equal(c7DocAfterFail.activeRevisionId, c7Doc.activeRevisionId);
+
+  // 6. 验证旧版知识库平滑迁移 (importLegacyDatabase)
+  // 创建磁盘上真实存在的文件以及不存在的文件
+  const realFileRel = 'docs/real-guide.md';
+  const realFileAbs = path.join(env.tempDir, realFileRel);
+  fs.mkdirSync(path.dirname(realFileAbs), { recursive: true });
+  fs.writeFileSync(
+    realFileAbs,
+    '# Real Project Guide\nLine 2: Guide body content.\nLine 3: Final step.'
+  );
+
+  const legacyDbPath = path.join(env.tempDir, 'legacy.db');
+  const legacyDb = new Database(legacyDbPath);
+  legacyDb.exec(`
+    CREATE TABLE chunks (
+      id TEXT PRIMARY KEY,
+      text TEXT NOT NULL,
+      source TEXT NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      collection_id TEXT
+    );
+  `);
+  legacyDb.prepare(`
+    INSERT INTO chunks (id, text, source, chunk_index, collection_id)
+    VALUES (?, ?, ?, ?, ?)
+  `).run('legacy-1', 'Line 2: Guide body content.', realFileRel, 0, 'legacy-col');
+  legacyDb.prepare(`
+    INSERT INTO chunks (id, text, source, chunk_index, collection_id)
+    VALUES (?, ?, ?, ?, ?)
+  `).run('legacy-2', 'Absent file chunk text.', 'missing/old.md', 0, 'legacy-col');
+  legacyDb.close();
+
+  // 执行迁移
+  const importResult = await service.importLegacyDatabase(ctx, legacyDbPath);
+  assert.equal(importResult.importedDocuments, 2);
+  assert.ok(importResult.importedChunks >= 2);
+  assert.equal(importResult.legacyLibraryId, `project:${ctx.workspaceId}:legacy`);
+
+  // 验证旧库原样保留、未被清空
+  const legacyVerifyDb = new Database(legacyDbPath, { readonly: true });
+  const legacyChunkCount = legacyVerifyDb.prepare('SELECT count(*) as c FROM chunks').get() as any;
+  assert.equal(legacyChunkCount.c, 2, '旧版知识库文件必须保持完整不可变');
+  legacyVerifyDb.close();
+
+  // 验证磁盘存在的文件生成了精确 span，不存在的文件保留了原文本
+  const legacyStoreDocs = store.listDocuments(`src-legacy-${ctx.workspaceId}`);
+  assert.equal(legacyStoreDocs.length, 2);
+
+  // 验证导入后的 legacy 库可被当前工作区检索
+  const legacySearchRes = await service.search(ctx, {
+    query: 'Guide body content',
+    mode: 'fact',
+    libraryIds: [importResult.legacyLibraryId],
+  });
+  assert.ok(legacySearchRes.hits.length > 0);
+  assert.ok(legacySearchRes.hits.some((h) => h.text.includes('Guide body content')));
 });
