@@ -2,10 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createServer } from 'node:http';
 import { createKnowledgeTestEnv, seedDocument } from './helpers/knowledge-fixture.js';
 import { chunkWithSpans } from '../src/knowledge/chunks.js';
 import { KnowledgeService } from '../src/knowledge/service.js';
 import type { KnowledgeContext } from '../src/knowledge/types.js';
+import { Runtime } from '../src/runtime/service.js';
 
 test('Scenario 1: 长文变短文/删除后旧片段退出而历史原文可读', async (t) => {
   const env = createKnowledgeTestEnv(t);
@@ -245,4 +247,250 @@ test('Scenario 3: 可控同步场景（忽略凭据、hash相同不重复embeddi
   assert.ok(deletedDoc);
   assert.equal(deletedDoc.activeRevisionId, null, 'Deleted doc active revision should be null');
   assert.deepEqual(env.store.currentChunks(deletedDoc.id), [], 'Deleted doc chunks should be empty');
+});
+
+test('Scenario 4: 范围隔离与 Worker IPC 往返（同路径项目隔离、伪造不扩大范围、图谱报错、真实 Worker IPC 回调）', async (t) => {
+  const env = createKnowledgeTestEnv(t);
+  const service = new KnowledgeService({
+    dataDir: env.tempDir,
+    store: env.store,
+  });
+  t.after(async () => {
+    await service.close();
+  });
+
+  const mockSharedPath = path.join(env.tempDir, 'shared-project');
+  fs.mkdirSync(mockSharedPath, { recursive: true });
+
+  const ctxP1: KnowledgeContext = {
+    workspaceId: 'p1',
+    workspacePath: mockSharedPath,
+    agentId: 'general',
+    role: 'owner',
+  };
+  const ctxP2: KnowledgeContext = {
+    workspaceId: 'p2',
+    workspacePath: mockSharedPath,
+    agentId: 'general',
+    role: 'owner',
+  };
+
+  service.attachWorkspace(ctxP1);
+  service.attachWorkspace(ctxP2);
+
+  // 1. 在 P1 中摄入文档
+  await service.dispatch(ctxP1, {
+    op: 'ingest',
+    input: {
+      content: 'Project 1 Alpha Architecture Blueprint with modular plugins.',
+      name: 'docs/spec.md',
+      libraryId: 'project:p1',
+    },
+  });
+
+  // 2. 在 P2 中摄入文档（相同相对路径 docs/spec.md）
+  await service.dispatch(ctxP2, {
+    op: 'ingest',
+    input: {
+      content: 'Project 2 Beta Secret Formula and classified credentials.',
+      name: 'docs/spec.md',
+      libraryId: 'project:p2',
+    },
+  });
+
+  // 3. 在 public-basic 摄入公共文档
+  let publicSource = env.store.getSource('src-public-basic');
+  if (!publicSource) {
+    publicSource = env.store.createSource({
+      id: 'src-public-basic',
+      libraryId: 'public-basic',
+      kind: 'managed',
+      locator: 'managed',
+      enabled: true,
+    });
+  }
+  const publicContent = 'General Company Coding Conventions and styling rules.';
+  env.store.publishRevision({
+    sourceId: publicSource.id,
+    sourceKey: 'docs/common.md',
+    content: publicContent,
+    hash: 'hash-public',
+    expectedPreviousRevisionId: null,
+    chunks: [
+      {
+        text: publicContent,
+        span: { startOffset: 0, endOffset: publicContent.length, startLine: 1, endLine: 1 },
+        evidenceKind: 'document',
+      },
+    ],
+  });
+
+  // 4. 范围隔离验证：P1 检索 Alpha 能命中 P1
+  const p1ResAlpha = (await service.dispatch(ctxP1, {
+    op: 'search',
+    input: { query: 'Alpha Architecture', mode: 'fact', topK: 5 },
+  })) as any;
+  assert.equal(p1ResAlpha.hits.length, 1);
+  assert.equal(p1ResAlpha.hits[0].citation.sourceUri, 'docs/spec.md');
+  assert.equal(p1ResAlpha.hits[0].citation.libraryId, 'project:p1');
+
+  // P1 检索 Secret Formula 绝不能命中 P2
+  const p1ResSecret = (await service.dispatch(ctxP1, {
+    op: 'search',
+    input: { query: 'Secret Formula', mode: 'fact', topK: 5 },
+  })) as any;
+  assert.equal(p1ResSecret.hits.length, 0, 'P1 must not see P2 documents');
+
+  // P1 检索公共规范可命中 public-basic
+  const p1ResPublic = (await service.dispatch(ctxP1, {
+    op: 'search',
+    input: { query: 'Coding Conventions', mode: 'fact', topK: 5 },
+  })) as any;
+  assert.equal(p1ResPublic.hits.length, 1);
+  assert.equal(p1ResPublic.hits[0].citation.libraryId, 'public-basic');
+
+  // P2 检索 Secret Formula 可命中 P2
+  const p2ResSecret = (await service.dispatch(ctxP2, {
+    op: 'search',
+    input: { query: 'Secret Formula', mode: 'fact', topK: 5 },
+  })) as any;
+  assert.equal(p2ResSecret.hits.length, 1);
+  const p2CitationId = p2ResSecret.hits[0].citation.id;
+
+  // 5. 跨项目引用读取隔离：P1 读取 P2 引用报错 403
+  assert.throws(
+    () => service.citation(ctxP1, p2CitationId),
+    /Citation access denied/
+  );
+
+  // 6. 伪造 libraryIds 不能扩大范围（过滤后返回空命中）
+  const p1ForgedRes = (await service.dispatch(ctxP1, {
+    op: 'search',
+    input: { query: 'Secret Formula', mode: 'fact', topK: 5, libraryIds: ['project:p2'] },
+  })) as any;
+  assert.equal(p1ForgedRes.hits.length, 0, 'Forged libraryIds must be filtered out and return empty hits');
+
+  // 未知 libraryId 报错
+  await assert.rejects(
+    async () =>
+      service.dispatch(ctxP1, {
+        op: 'search',
+        input: { query: 'test', mode: 'fact', topK: 5, libraryIds: ['unknown-non-existent-lib'] },
+      }),
+    /未知知识库 ID/
+  );
+
+  // 7. 图谱请求在 P2 启用前返回明确不可用错误，不回退全库
+  await assert.rejects(
+    async () =>
+      service.dispatch(ctxP1, {
+        op: 'graph',
+        input: { entityId: 'E1', hops: 1 },
+      }),
+    /知识图谱功能尚未启用/
+  );
+
+  // 8. 复用现有 worker fixture 验证真实 worker IPC 往返回到主服务
+  const mockServer = createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    const input = JSON.parse(body);
+    const results = input.messages.filter((m: any) => m.role === 'tool');
+    let calls: Array<{ name: string; arguments: unknown }> = [];
+    if (!results.length) {
+      calls = [{ name: 'rag_search', arguments: { query: 'Alpha Architecture' } }];
+    }
+    response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    const delta = calls.length
+      ? {
+          tool_calls: calls.map((call, index) => ({
+            index,
+            id: `call-${index}`,
+            type: 'function',
+            function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+          })),
+        }
+      : { content: 'search completed' };
+    const chunk = (val: unknown) => response.write(`data: ${JSON.stringify(val)}\n\n`);
+    chunk({
+      id: 'mock-1',
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: 'fixture',
+      choices: [{ index: 0, delta, finish_reason: null }],
+    });
+    chunk({
+      id: 'mock-1',
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: 'fixture',
+      choices: [{ index: 0, delta: {}, finish_reason: calls.length ? 'tool_calls' : 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+    });
+    response.end('data: [DONE]\n\n');
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    mockServer.once('error', reject);
+    mockServer.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(() => {
+    mockServer.close();
+  });
+
+  const address = mockServer.address();
+  assert.ok(address && typeof address !== 'string');
+
+  const workerTestDir = path.join(env.tempDir, 'worker-test-ws');
+  fs.mkdirSync(workerTestDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(workerTestDir, 'cheese-agent.config.json'),
+    JSON.stringify({
+      model: {
+        provider: 'openai',
+        name: 'fixture',
+        apiKey: 'fixture-key',
+        baseURL: `http://127.0.0.1:${address.port}/v1`,
+      },
+      rag: { enabled: true },
+    })
+  );
+
+  const runtime = new Runtime(path.join(workerTestDir, 'state'));
+  t.after(async () => {
+    await runtime.close();
+  });
+
+  const ws = runtime.addWorkspace(workerTestDir);
+  // 在当前 runtime 的 knowledgeService 中导入文档
+  await runtime.knowledgeService.dispatch(
+    {
+      workspaceId: ws.id,
+      workspacePath: workerTestDir,
+      agentId: 'general',
+      role: 'owner',
+    },
+    {
+      op: 'ingest',
+      input: {
+        content: 'Alpha Architecture Document in Worker Runtime Workspace',
+        name: 'docs/alpha.md',
+        libraryId: `project:${ws.id}`,
+      },
+    }
+  );
+
+  const session = runtime.createSession(ws.id);
+  const run = runtime.submit(session.id, '请检索相关知识', 'req-knowledge-1');
+  await runtime.idle();
+
+  assert.equal(run.status, 'completed', run.error);
+  const events = runtime.events(run.id);
+
+  // 确认在真实 worker 中执行了 rag_search 工具，且 IPC 回到了主服务并触发了 knowledge-used 事件
+  const knowledgeUsedEvent = events.find((e) => e.type === 'knowledge-used');
+  assert.ok(knowledgeUsedEvent, 'Must emit knowledge-used event via IPC from worker');
+  const toolResultEvent = events.find((e) => e.type === 'tool-result' && e.name === 'rag_search');
+  assert.ok(toolResultEvent, 'Worker must execute rag_search tool through IPC');
+  assert.match(String(toolResultEvent?.output), /Alpha Architecture Document/);
 });

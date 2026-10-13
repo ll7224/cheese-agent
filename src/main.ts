@@ -2,6 +2,8 @@ import 'dotenv/config';
 import { loadConfig } from './config/loader.js';
 import type { SuperAgentConfig } from './config/schema.js';
 import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
 import { type ModelMessage } from 'ai';
 import { createInterface } from 'node:readline';
 import { getModel } from './agent/model.js';
@@ -10,6 +12,11 @@ import { allTools } from './tools/index.js';
 import { createToolSearchTool } from './tools/tool-search.js';
 import { createMemoryTool } from './tools/memory-tools.js';
 import { createRagTools } from './tools/rag-tools.js';
+import { getLegacyRag } from './rag/legacy-runtime.js';
+import { KnowledgeService } from './knowledge/service.js';
+import { createKnowledgeRpcDispatcher } from './runtime/knowledge-rpc.js';
+import { createKnowledgeTools } from './tools/knowledge-tools.js';
+import type { KnowledgeContext } from './knowledge/types.js';
 import { MCPClient } from './tools/mcp-client.js';
 import { executeAgent as agentLoop } from './runtime/execution.js';
 import { SessionStore } from './session/store.js';
@@ -91,8 +98,7 @@ memoryStore.init();
 // 注册用户偏好、长期事实读写记忆工具
 registry.register(createMemoryTool(memoryStore));
 
-// ── 4. 向量检索与 RAG 引擎 (Vector Store & Embedder) ─────────────
-const vectorStore = new SqliteVectorStore(config.rag.enabled ? 'knowledge.db' : ':memory:');
+// ── 4. 向量检索与工程知识中心 (Knowledge Center & Embedder) ──────
 // 优先解析专用 DashScope 向量密钥，避免将主 LLM 的密钥混传导致 401 失败
 const ragApiKey =
   config.rag?.apiKey ||
@@ -101,7 +107,27 @@ const ragApiKey =
 const embedFn = ragApiKey
   ? createDashScopeEmbedder(ragApiKey)
   : createMockEmbedder();
-if (config.rag.enabled) registry.register(...createRagTools(vectorStore, embedFn));
+
+const knowledgeDataDir = process.env.CHEESE_KNOWLEDGE_DATA_DIR || path.join(process.cwd(), '.cheese-knowledge');
+const normalizedCwd = path.resolve(process.cwd());
+const cliWorkspaceId = crypto.createHash('sha256').update(normalizedCwd).digest('hex').slice(0, 12);
+let cliKnowledgeService: KnowledgeService | undefined;
+
+export function getCliKnowledgeService(): KnowledgeService {
+  if (!cliKnowledgeService) {
+    cliKnowledgeService = new KnowledgeService({
+      dataDir: knowledgeDataDir,
+      embedderForWorkspace: () => (ragApiKey ? (texts) => embed(createDashScopeEmbedder(ragApiKey), texts) : undefined),
+    });
+    cliKnowledgeService.attachWorkspace({
+      workspaceId: cliWorkspaceId,
+      workspacePath: normalizedCwd,
+      agentId: 'general',
+      role: (configuredRole as 'owner' | 'collaborator' | 'guest') || 'owner',
+    });
+  }
+  return cliKnowledgeService;
+}
 
 /**
  * 尝试通过 MCP 协议动态连接外部服务（例如 GitHub 官方 MCP Server）
@@ -202,7 +228,16 @@ const builder = new PromptBuilder()
   .pipe('toolGuide', toolGuide())
   .pipe('deferredTools', deferredTools())
   .pipe('memoryContext', memoryContext(memoryStore))
-  .pipe('ragContext', config.rag.enabled ? ragContext(vectorStore) : () => null)
+  .pipe('ragContext', config.rag.enabled ? () => {
+    try {
+      const ks = getCliKnowledgeService();
+      const count = (ks.store.db.prepare('SELECT count(*) as count FROM documents').get() as any)?.count || 0;
+      if (count === 0) return null;
+      return `[知识库] 已索引 ${count} 篇工程资料。使用 rag_search 工具搜索知识库。`;
+    } catch {
+      return null;
+    }
+  } : () => null)
   .pipe('skillContext', () => skillLoader.buildPromptSection(activeSkills))
   .pipe('sessionContext', sessionContext());
 
@@ -325,7 +360,10 @@ export async function startAgent() {
       const ctx: CommandContext = {
         messages, timestamps, registry, builder, tracker,
         sessionStore: store, model, makePromptCtx, ask,
-        memoryStore, vectorStore,
+        memoryStore,
+        get vectorStore() {
+          return getLegacyRag(config.rag.enabled);
+        },
       };
       const handled = dispatch(trimmed, ctx);
       if (handled === 'async') return; // 异步指令，由指令自身控制回调
@@ -375,20 +413,23 @@ export async function startAgent() {
   console.log('    /agents       — 查看子 Agent 执行记录');
   console.log('');
 
-  // 8. 自动扫描与载入本地知识库文档 (docs/ 目录冷启动)
-  if (config.rag.enabled && fs.existsSync(config.rag.docsDir)) {
-    const files = fs.readdirSync(config.rag.docsDir).filter(f => f.endsWith('.md'));
-    if (files.length > 0) {
-      console.log(`  发现 ${files.length} 个文档，自动导入知识库...`);
-      for (const f of files) {
-        const path = `${config.rag.docsDir}/${f}`;
-        const text = fs.readFileSync(path, 'utf-8');
-        const chunks = chunkDocument(path, text);
-        const embeddings = await embed(embedFn, chunks.map(c => c.text));
-        vectorStore.addBatch(chunks.map((c, i) => ({ chunk: c, embedding: embeddings[i] })));
+  // 8. 初始化工程知识中心服务与作用域工具
+  if (config.rag.enabled) {
+    const ks = getCliKnowledgeService();
+    const cliKnowledgeCtx: KnowledgeContext = {
+      workspaceId: cliWorkspaceId,
+      workspacePath: normalizedCwd,
+      agentId: 'general',
+      role: (configuredRole as 'owner' | 'collaborator' | 'guest') || 'owner',
+    };
+    const cliKnowledgeRpc = createKnowledgeRpcDispatcher(ks, cliKnowledgeCtx);
+    registry.register(...createKnowledgeTools(cliKnowledgeRpc));
+    try {
+      const count = (ks.store.db.prepare('SELECT count(*) as count FROM documents').get() as any)?.count || 0;
+      if (count > 0) {
+        console.log(`  工程知识中心就绪，共 ${count} 篇文档\n`);
       }
-      console.log(`  知识库就绪，共 ${vectorStore.size()} 个片段\n`);
-    }
+    } catch {}
   }
 
   // 进入交互循环
@@ -428,6 +469,19 @@ export async function runTask(messages: ModelMessage[], options: ExecutionOption
 
   registry.register(createSpawnTool(agentRegistry, () => ({ ...getSpawnCtx(), ...options })));
   if (options.manageCron) registry.register({ ...createCronTool(cronService), execute: options.manageCron });
+  if (options.knowledge) {
+    registry.register(...createKnowledgeTools(options.knowledge, options.emit));
+  } else if (config.rag.enabled) {
+    const ks = getCliKnowledgeService();
+    const cliKnowledgeCtx: KnowledgeContext = {
+      workspaceId: cliWorkspaceId,
+      workspacePath: normalizedCwd,
+      agentId: options.agentId || 'general',
+      role: 'owner',
+    };
+    const rpc = createKnowledgeRpcDispatcher(ks, cliKnowledgeCtx, options.signal);
+    registry.register(...createKnowledgeTools(rpc, options.emit));
+  }
 
   // 3. 动态组装系统提示词（融入领域专用 Prompt）
   let systemPrompt = builder.build(makePromptCtx());
@@ -444,6 +498,7 @@ export async function runTask(messages: ModelMessage[], options: ExecutionOption
     'memory_search',
     'rag_search',
     'rag_ingest',
+    'knowledge_graph',
     'tool_search',
   ];
   const effectiveRegistry = agent.tools.includes('*')

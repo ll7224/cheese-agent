@@ -258,13 +258,13 @@ knowledge: request => {
 
 role 从当前已解析配置得到，兼容 developer→owner。RPC Zod 解析拒绝额外字段、非法 op、未知引用及不属于可访问库的 libraryIds；超时默认 15 秒，abort/disconnect 拒绝所有 pending，不切回全库。
 
-- [ ] legacy-runtime.ts 提供 getLegacyRag()，仅旧 /rag 命令或明确兼容入口首次访问才开旧库；runTask 的新工具不打开旧库。启动横幅/Prompt 改读知识服务摘要，不因统计调用触发 legacy 初始化。
-- [ ] CLI startAgent 显式创建独立服务，默认目录 cwd/.cheese-knowledge，可用 CHEESE_KNOWLEDGE_DATA_DIR 改址；项目 ID 为规范化路径 hash。REPL/CLI Channel/Cron 注册同样的范围工具，新知识写入不与 Web 数据目录隐式共享；旧 /rag 保留显式 legacy 语义。
-- [ ] rag_search 的 query/top_k/collection 兼容旧参数；collection 被映射为 libraryId，未知 ID 报错。增加 mode 和 include_graph；rag_ingest 经 RPC 校验目标项目库、角色和已启用本地来源，不允许 worker 任意改写公共库。
-- [ ] 默认库组合：当前项目库+public basic+当前 Agent 绑定库；manifest knowledge 解析为已存在库 ID，未知 ID显示绑定失效。general 再按名称/描述分词匹配最多 3 个 public domain 库；不为选库增加模型请求。
-- [ ] query embedding 在读事务前完成；readSnapshot 同步完成范围过滤、searchPrepared 与引用/图证据读取。embedding 无配置或 rag.enabled=false 时 FTS-only，不将 mock 向量作为真实语义检索。
-- [ ] 输出结构化 SearchResponse 和 knowledge-used 事件，包含 generation、库名/ID、引用 ID、候选状态和更新提示；Prompt 明确区分 code/document/decision/observation/inference。
-- [ ] 增加 1 个范围/IPC 场景：两个项目使用相同路径、一个 public 库；P1 不能检索/读引用 P2，空可访问范围返回空，伪造 workspace/collection 不扩大范围。复用现有 worker fixture 确认请求经真实 worker 回到主服务，不另起测试框架。graph op 在任务 5 启用前返回明确不可用错误，不回退文本或全库。
+- [x] legacy-runtime.ts 提供 getLegacyRag()，仅旧 /rag 命令或明确兼容入口首次访问才开旧库；runTask 的新工具不打开旧库。启动横幅/Prompt 改读知识服务摘要，不因统计调用触发 legacy 初始化。
+- [x] CLI startAgent 显式创建独立服务，默认目录 cwd/.cheese-knowledge，可用 CHEESE_KNOWLEDGE_DATA_DIR 改址；项目 ID 为规范化路径 hash。REPL/CLI Channel/Cron 注册同样的范围工具，新知识写入不与 Web 数据目录隐式共享；旧 /rag 保留显式 legacy 语义。
+- [x] rag_search 的 query/top_k/collection 兼容旧参数；collection 被映射为 libraryId，未知 ID 报错。增加 mode 和 include_graph；rag_ingest 经 RPC 校验目标项目库、角色和已启用本地来源，不允许 worker 任意改写公共库。
+- [x] 默认库组合：当前项目库+public basic+当前 Agent 绑定库；manifest knowledge 解析为已存在库 ID，未知 ID显示绑定失效。general 再按名称/描述分词匹配最多 3 个 public domain 库；不为选库增加模型请求。
+- [x] query embedding 在读事务前完成；readSnapshot 同步完成范围过滤、searchPrepared 与引用/图证据读取。embedding 无配置或 rag.enabled=false 时 FTS-only，不将 mock 向量作为真实语义检索。
+- [x] 输出结构化 SearchResponse 和 knowledge-used 事件，包含 generation、库名/ID、引用 ID、候选状态和更新提示；Prompt 明确区分 code/document/decision/observation/inference。
+- [x] 增加 1 个范围/IPC 场景：两个项目使用相同路径、一个 public 库；P1 不能检索/读引用 P2，空可访问范围返回空，伪造 workspace/collection 不扩大范围。复用现有 worker fixture 确认请求经真实 worker 回到主服务，不另起测试框架。graph op 在任务 5 启用前返回明确不可用错误，不回退文本或全库。
 
 **交付:** 领域绑定真正生效、引用可追溯，停止任务不会留下悬挂知识请求。
 

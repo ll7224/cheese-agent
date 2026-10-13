@@ -13,6 +13,9 @@ import { createCronTool } from '../tools/cron-tools.js';
 import { ModelStore, type StoredModel, type MaskedModel, testConnection, fetchRemoteModels } from './model-store.js';
 import type { CheeseAgentConfig } from '../config/schema.js';
 import { DomainAgentRegistry } from '../agents/domain-registry.js';
+import { KnowledgeService } from '../knowledge/service.js';
+import type { KnowledgeRpc } from '../knowledge/types.js';
+import { createKnowledgeRpcDispatcher } from './knowledge-rpc.js';
 
 export interface Workspace { id: string; path: string; name: string }
 export interface Session { id: string; workspaceId: string; title: string; updatedAt: string; messages: ModelMessage[]; config?: ConfigSnapshot; source?: string; modelId?: string; activeSkills?: string[]; agentId?: string }
@@ -27,7 +30,7 @@ function readState(file: string): State {
   }
   return state;
 }
-export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; activeSkills?: string[]; agentId?: string; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void>; manageCron: (input: any) => Promise<unknown>; signal: AbortSignal }
+export interface Execution { cwd: string; messages: ModelMessage[]; config?: unknown; activeSkills?: string[]; agentId?: string; emit: (event: AgentEvent) => void; acquireChild: (id: string) => Promise<() => void>; manageCron: (input: any) => Promise<unknown>; knowledge?: KnowledgeRpc; signal: AbortSignal }
 export type Executor = (execution: Execution) => Promise<ModelMessage[]>;
 export class RuntimeError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -47,11 +50,15 @@ export class Runtime {
   private schedulesEnabled = false;
   private recoveredBackup = false;
   modelStore: ModelStore;
+  readonly knowledgeService: KnowledgeService;
 
   constructor(dataDir: string, private executor: Executor = executeWorker, private options: { configDir?: string; modelDir?: string; maxConcurrent?: number; maxChildren?: number } = {}) {
     const isCustomDataDir = dataDir.includes('cheese-') || dataDir.includes('/tmp') || dataDir.includes('/var/folders');
     const defaultModelDir = isCustomDataDir ? join(dataDir, 'models') : join(homedir(), '.cheese');
     this.modelStore = new ModelStore(options.modelDir || defaultModelDir);
+    this.knowledgeService = new KnowledgeService({
+      dataDir: join(dataDir, 'knowledge'),
+    });
     this.children = new Pool(options.maxChildren ?? 3);
     if (!Number.isInteger(options.maxConcurrent ?? 3) || (options.maxConcurrent ?? 3) < 1) throw new RuntimeError('并发额度必须为正整数');
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -63,6 +70,16 @@ export class Runtime {
       this.state = readState(`${this.file}.bak`);
       this.recoveredBackup = true;
       console.warn('会话快照损坏，已从上一份备份恢复');
+    }
+    for (const workspace of this.state.workspaces) {
+      try {
+        this.knowledgeService.attachWorkspace({
+          workspaceId: workspace.id,
+          workspacePath: workspace.path,
+          agentId: 'general',
+          role: 'owner',
+        });
+      } catch {}
     }
     this.state.events ||= [];
     this.bus.setMaxListeners(0);
@@ -122,6 +139,14 @@ export class Runtime {
     if (existing) return existing;
     const workspace = { id: randomUUID(), path: canonical, name: canonical.split('/').at(-1) || canonical };
     this.state.workspaces.push(workspace);
+    try {
+      this.knowledgeService.attachWorkspace({
+        workspaceId: workspace.id,
+        workspacePath: workspace.path,
+        agentId: 'general',
+        role: 'owner',
+      });
+    } catch {}
     this.save();
     return workspace;
   }
@@ -350,7 +375,29 @@ export class Runtime {
       const config = session.config ? resolveConfig(session.config) : undefined;
       secrets = collectSecrets(config);
       stream = redactStream(secrets, event => this.emit(run, { ...event, ...(event.childRunId ? { rootRunId: run.id, parentRunId: run.id } : {}) }, secrets));
-      const resultMessages = await this.executor({ cwd: workspace.path, messages: structuredClone(session.messages), config, activeSkills: session.activeSkills || [], agentId: session.agentId || 'general', emit: event => stream!.push(event), acquireChild: () => this.children.acquire(controller.signal), manageCron: input => { controller.signal.throwIfAborted(); return this.manageCron(workspace.id, input, config); }, signal: controller.signal });
+      const knowledgeRpc = createKnowledgeRpcDispatcher(
+        this.knowledgeService,
+        {
+          workspaceId: workspace.id,
+          workspacePath: workspace.path,
+          agentId: session.agentId || 'general',
+          runId: run.id,
+          role: 'owner',
+        },
+        controller.signal
+      );
+      const resultMessages = await this.executor({
+        cwd: workspace.path,
+        messages: structuredClone(session.messages),
+        config,
+        activeSkills: session.activeSkills || [],
+        agentId: session.agentId || 'general',
+        emit: event => stream!.push(event),
+        acquireChild: () => this.children.acquire(controller.signal),
+        manageCron: input => { controller.signal.throwIfAborted(); return this.manageCron(workspace.id, input, config); },
+        knowledge: knowledgeRpc,
+        signal: controller.signal,
+      });
       const currentModelName = config?.model?.name || session.config?.values?.model?.name;
       const reasoningEvents = this.events(run.id).filter(e => e.type === 'reasoning');
       const reasoningText = reasoningEvents.map(e => String(e.text || '')).join('');
@@ -423,6 +470,9 @@ export class Runtime {
       run.status = 'interrupted'; run.error = '服务关闭，任务已中断';
       this.emit(run, { type: 'status', status: run.status, error: run.error });
     }
+    try {
+      await this.knowledgeService.close();
+    } catch {}
   }
 
   async idle() { while (this.jobs.size) await Promise.all(this.jobs); }

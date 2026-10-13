@@ -6,3 +6,4 @@ export * from './store.js';
 export * from './sources.js';
 export * from './local-sync.js';
 export * from './service.js';
+export * from './retriever.js';

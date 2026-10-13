@@ -40,6 +40,7 @@ export interface Citation {
   commit?: string;
   status: KnowledgeStatus;
   evidenceKind: 'code' | 'document' | 'decision' | 'observation' | 'inference';
+  libraryId?: string;
 }
 
 export interface CitationView {

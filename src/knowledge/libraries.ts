@@ -93,6 +93,11 @@ export function resolveLibraries(
   const accessibleIds = Array.from(accessibleSet);
 
   if (requestedIds && requestedIds.length > 0) {
+    for (const id of requestedIds) {
+      if (!allLibraries.some((lib) => lib.id === id)) {
+        throw new Error(`未知知识库 ID: ${id}`);
+      }
+    }
     return requestedIds.filter((id) => accessibleSet.has(id));
   }
 

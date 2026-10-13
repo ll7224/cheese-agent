@@ -9,6 +9,12 @@ process.on('message', (message: any) => {
     else request?.resolve(message.output);
     pending.delete(message.id);
   }
+  if (message.type === 'knowledge-result') {
+    const request = pending.get(message.id);
+    if (message.error) request?.reject(new Error(message.error));
+    else request?.resolve(message.output);
+    pending.delete(message.id);
+  }
   if (message.type === 'child-granted') { pending.get(message.id)?.resolve(); pending.delete(message.id); }
   if (message.type === 'child-denied') { pending.get(message.id)?.reject(new Error('子任务已取消')); pending.delete(message.id); }
   if (message.type === 'abort') {
@@ -34,6 +40,12 @@ process.once('message', async (request: any) => {
         process.send?.({ type: 'cron', id, input });
       }),
       emit: event => process.send?.({ type: 'event', event }),
+      knowledge: request => new Promise((resolve, reject) => {
+        controller.signal.throwIfAborted();
+        const id = randomUUID();
+        pending.set(id, { resolve, reject });
+        process.send?.({ type: 'knowledge', id, request });
+      }),
       acquireChild: async id => {
         controller.signal.throwIfAborted();
         await new Promise<void>((resolve, reject) => { pending.set(id, { resolve, reject }); process.send?.({ type: 'child-acquire', id }); });

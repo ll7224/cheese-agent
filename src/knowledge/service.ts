@@ -3,10 +3,19 @@ import fs from 'node:fs';
 import { KnowledgeStore } from './store.js';
 import { LocalSyncManager, type EmbeddingFn } from './local-sync.js';
 import { discoverWorkspaceSources } from './sources.js';
+import {
+  executeSearch,
+  getCitationView,
+  executeIngest,
+} from './retriever.js';
 import type {
   KnowledgeContext,
   SourceProposal,
   Source,
+  SearchRequest,
+  SearchResponse,
+  CitationView,
+  KnowledgeRequest,
 } from './types.js';
 
 export interface KnowledgeServiceOptions {
@@ -145,6 +154,45 @@ export class KnowledgeService {
     if (source.kind === 'local') {
       await this.localSync.syncSource(source, ctx.workspacePath);
     }
+  }
+
+  /**
+   * 执行范围受限的混合知识检索
+   */
+  async search(ctx: KnowledgeContext, request: SearchRequest): Promise<SearchResponse> {
+    const embedder = this.options.embedderForWorkspace
+      ? this.options.embedderForWorkspace(ctx.workspaceId)
+      : undefined;
+    return executeSearch(this.store, ctx, request, embedder);
+  }
+
+  /**
+   * 获取指定引用的原文内容与版本视图
+   */
+  citation(ctx: KnowledgeContext, id: string): CitationView {
+    return getCitationView(this.store, ctx, id);
+  }
+
+  /**
+   * 统一分发 KnowledgeRequest
+   */
+  async dispatch(ctx: KnowledgeContext, request: KnowledgeRequest): Promise<unknown> {
+    if (request.op === 'search') {
+      return this.search(ctx, request.input);
+    }
+    if (request.op === 'citation') {
+      return this.citation(ctx, request.input.citationId);
+    }
+    if (request.op === 'graph') {
+      throw new Error('知识图谱功能尚未启用 (P2 阶段提供)');
+    }
+    if (request.op === 'ingest') {
+      const embedder = this.options.embedderForWorkspace
+        ? this.options.embedderForWorkspace(ctx.workspaceId)
+        : undefined;
+      return executeIngest(this.store, ctx, request.input, embedder);
+    }
+    throw new Error(`Unknown knowledge op: ${(request as any).op}`);
   }
 
   /**
