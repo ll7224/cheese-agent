@@ -20,6 +20,7 @@
     })();
   </script>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/knowledge/style.css">
 </head>
 <body>
   <div class="shell">
@@ -67,6 +68,10 @@
           <span class="crumb-current" id="breadcrumb">总览</span>
         </div>
         <div class="topbar-right">
+          <button class="icon-button knowledge-toggle" id="open-knowledge-btn" type="button" aria-label="工程知识中心" title="工程知识中心与来源管理">
+            <span class="btn-icon" aria-hidden="true">📚</span>
+            <span class="topbar-btn-text">知识中心</span>
+          </button>
           <button class="icon-button model-config-toggle" id="open-model-settings" type="button" aria-label="配置模型与 API Key" title="配置大语言模型与 API Key">
             <span class="btn-icon" aria-hidden="true">⚡</span>
             <span class="topbar-btn-text">模型配置</span>
@@ -299,6 +304,8 @@
             <span class="footer-tip">保持专注，让构建顺畅发生。</span>
           </footer>
         </div>
+
+        <section id="knowledge-view" class="knowledge-view" hidden aria-label="工程知识中心"></section>
 
         <aside id="inspector" class="inspector" hidden aria-label="执行详情">
           <div class="inspector-heading">

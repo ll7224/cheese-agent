@@ -412,6 +412,109 @@ export class KnowledgeStore {
   }
 
   /**
+   * 根据 ID 查询文档详情
+   */
+  getDocumentById(documentId: string): {
+    id: string;
+    sourceId: string;
+    sourceKey: string;
+    activeRevisionId: string | null;
+    status: string;
+    createdAt: number;
+    updatedAt: number;
+  } | null {
+    const row = this.db.prepare(`SELECT * FROM documents WHERE id = ?`).get(documentId) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      sourceId: row.source_id,
+      sourceKey: row.source_key,
+      activeRevisionId: row.active_revision_id,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  /**
+   * 列出文档的历史版本列表
+   */
+  listRevisions(documentId: string): Array<{
+    id: string;
+    documentId: string;
+    hash: string;
+    commitHash?: string;
+    createdAt: number;
+  }> {
+    const rows = this.db.prepare(`
+      SELECT id, document_id, hash, commit_hash, created_at
+      FROM revisions
+      WHERE document_id = ?
+      ORDER BY created_at DESC
+    `).all(documentId) as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      documentId: r.document_id,
+      hash: r.hash,
+      commitHash: r.commit_hash || undefined,
+      createdAt: r.created_at,
+    }));
+  }
+
+  /**
+   * 分页或按条件查询文档列表
+   */
+  listDocumentsPaged(options: {
+    libraryId?: string;
+    sourceId?: string;
+    limit?: number;
+    offset?: number;
+  }): Array<{
+    id: string;
+    sourceId: string;
+    sourceKey: string;
+    activeRevisionId: string | null;
+    status: string;
+    libraryId: string;
+    createdAt: number;
+    updatedAt: number;
+  }> {
+    const limit = Math.min(Math.max(options.limit || 50, 1), 100);
+    const offset = Math.max(options.offset || 0, 0);
+    let sql = `
+      SELECT d.id, d.source_id, d.source_key, d.active_revision_id, d.status, d.created_at, d.updated_at, s.library_id
+      FROM documents d
+      JOIN sources s ON s.id = d.source_id
+    `;
+    const params: any[] = [];
+    const where: string[] = [];
+    if (options.sourceId) {
+      where.push('d.source_id = ?');
+      params.push(options.sourceId);
+    }
+    if (options.libraryId) {
+      where.push('s.library_id = ?');
+      params.push(options.libraryId);
+    }
+    if (where.length > 0) {
+      sql += ` WHERE ` + where.join(' AND ');
+    }
+    sql += ` ORDER BY d.updated_at DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+    const rows = this.db.prepare(sql).all(...params) as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      sourceId: r.source_id,
+      sourceKey: r.source_key,
+      activeRevisionId: r.active_revision_id,
+      status: r.status,
+      libraryId: r.library_id,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  }
+
+  /**
    * 关闭底层数据库
    */
   close(): void {

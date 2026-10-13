@@ -274,7 +274,7 @@ role 从当前已解析配置得到，兼容 developer→owner。RPC Zod 解析�
 
 **Produces:** 独立 #knowledge 路由、当前工作区知识管理，以及 Agent 回答中的引用入口。
 
-- [ ] 将 API 登记放在 app.all('/api/*',404) 之前，复用现有 Host/Origin/JSON/1 MiB 中间件。以查询/路径 workspaceId 查 Runtime 得到真实上下文，知识 ID 再做作用域检查；未知 ID 返回 404，不回退默认库。
+- [x] 将 API 登记放在 app.all('/api/*',404) 之前，复用现有 Host/Origin/JSON/1 MiB 中间件。以查询/路径 workspaceId 查 Runtime 得到真实上下文，知识 ID 再做作用域检查；未知 ID 返回 404，不回退默认库。
 
 | 接口 | 行为 |
 | --- | --- |
@@ -292,11 +292,11 @@ role 从当前已解析配置得到，兼容 developer→owner。RPC Zod 解析�
 
 所有列表默认 50、最大 100。导入 JSON 使用 {libraryId,path? ,content?,name?}，path 与 content 二选一；path 限已启用来源，content 上限沿用 1 MiB。编辑 local 文档创建 managed Source/副本，保留 derivedFrom，返回明确提示，不修改原源码。
 
-- [ ] 注册 /knowledge/*.js 与 /knowledge/style.css 的明确允许名单；未知静态路径返回 404，不能将任意路径传给 readFileSync。仅在既有 app.js 加独立模块导入和路由挂载，既有主题/class 复用。
-- [ ] 提供库切换、资料列表/编辑、来源清单/同步状态和绑定操作；引用面板纯文本展示原文、1-based 行号、版本状态与当前版本入口。Markdown 展示不执行原始 HTML/脚本。
-- [ ] 使用 knowledge-used 事件关联回答引用，不只用正则把普通 [1] 文本猜成引用。引用链接包含 citationId，刷新通过 Run 事件恢复。
-- [ ] 文档说明首次清单启用、自动同步、手动导入、public/project 和 legacy 入口；使用真实服务接口，不写“专属知识库已隔离”占位文案。
-- [ ] P1 集中检查：运行下面命令一次。测试失败只修相关项并重跑失败文件；不会因这次新增页面补大量 DOM/截图测试。
+- [x] 注册 /knowledge/*.js 与 /knowledge/style.css 的明确允许名单；未知静态路径返回 404，不能将任意路径传给 readFileSync。仅在既有 app.js 加独立模块导入和路由挂载，既有主题/class 复用。
+- [x] 提供库切换、资料列表/编辑、来源清单/同步状态和绑定操作；引用面板纯文本展示原文、1-based 行号、版本状态与当前版本入口。Markdown 展示不执行原始 HTML/脚本。
+- [x] 使用 knowledge-used 事件关联回答引用，不只用正则把普通 [1] 文本猜成引用。引用链接包含 citationId，刷新通过 Run 事件恢复。
+- [x] 文档说明首次清单启用、自动同步、手动导入、public/project 和 legacy 入口；使用真实服务接口，不写“专属知识库已隔离”占位文案。
+- [x] P1 集中检查：运行下面命令一次。测试失败只修相关项并重跑失败文件；不会因这次新增页面补大量 DOM/截图测试。
 
 ```sh
 npm run build

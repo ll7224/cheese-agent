@@ -1,3 +1,6 @@
+import { KnowledgeController } from './knowledge/controller.js';
+import { renderMessageCitations } from './knowledge/citations.js';
+
 const element = id => document.getElementById(id);
 const labels = { queued: '排队中', running: '运行中', stopping: '正在停止', completed: '已完成', failed: '执行失败', error: '失败', timeout: '已超时', cancelled: '已停止', interrupted: '已中断' };
 const active = status => ['queued', 'running', 'stopping'].includes(status);
@@ -28,6 +31,18 @@ let currentSessionSkills = [];
 let slashSelectedIndex = 0;
 let availableAgents = [];
 let selectedAgentId = localStorage.getItem('cheese.selectedAgent') || 'general';
+
+let knowledgeController = null;
+function getKnowledgeController() {
+  if (!knowledgeController) {
+    knowledgeController = new KnowledgeController(
+      element('knowledge-view'),
+      () => workspaceId,
+      () => availableAgents
+    );
+  }
+  return knowledgeController;
+}
 
 const node = (tag, className, text) => {
   const result = document.createElement(tag);
@@ -223,6 +238,40 @@ function navigate(id = '') {
 }
 
 function changeRoute() {
+  const isKnowledge = location.hash === '#knowledge';
+  const knView = element('knowledge-view');
+  if (knView) knView.hidden = !isKnowledge;
+
+  if (isKnowledge) {
+    sessionId = '';
+    currentSession = undefined;
+    currentRun = undefined;
+    currentSessionSkills = [];
+    closeModelPopover();
+    closeSkillPopover();
+    closeAgentPopover();
+    if (element('slash-autocomplete')) element('slash-autocomplete').hidden = true;
+    messagesSignature = '';
+    eventSource?.close(); eventSource = undefined; streamingRun = undefined; events.clear(); element('events').replaceChildren();
+    element('error').hidden = true;
+    element('live-text').innerHTML = '';
+    if (element('live-reasoning')) element('live-reasoning').hidden = true;
+    if (element('live-reasoning-text')) element('live-reasoning-text').innerHTML = '';
+    if (element('live-tool-status')) element('live-tool-status').hidden = true;
+    document.body.classList.remove('workbench');
+    element('hero').hidden = true;
+    element('home-bottom').hidden = true;
+    element('conversation').hidden = true;
+    if (element('composer')) element('composer').closest('.composer-area').hidden = true;
+    element('toggle-details').hidden = true;
+    setDetails(false);
+    element('breadcrumb').textContent = '工程知识中心';
+    if (matchMedia('(max-width:850px)').matches) setSidebar(false);
+    getKnowledgeController().init();
+    return;
+  }
+
+  if (element('composer')) element('composer').closest('.composer-area').hidden = false;
   sessionId = location.hash.slice(1);
   if (!sessionId) {
     currentSession = undefined;
@@ -313,6 +362,22 @@ function renderMessages(session) {
   if (signature === messagesSignature) return;
   messagesSignature = signature;
   const sessionDefaultModel = session.config?.values?.model?.name || '';
+
+  const runCitationsMap = new Map();
+  const allEvts = (session.events || []).concat([...events.values()]);
+  allEvts.forEach(evt => {
+    if (evt.type === 'knowledge-used' && Array.isArray(evt.citations)) {
+      const existing = runCitationsMap.get(evt.runId) || [];
+      const merged = [...existing];
+      evt.citations.forEach(c => {
+        if (!merged.some(m => m.citationId === c.citationId)) {
+          merged.push(c);
+        }
+      });
+      runCitationsMap.set(evt.runId, merged);
+    }
+  });
+
   element('messages').replaceChildren(...session.messages.filter(message => ['user', 'assistant'].includes(message.role) && (messageText(message) || message.reasoning)).map(message => {
     const article = node('article', `message ${message.role}`);
     const author = node('div', 'message-author');
@@ -349,6 +414,12 @@ function renderMessages(session) {
     const content = node('div', `message-content ${message.role === 'assistant' ? 'markdown-body' : ''}`);
     if (message.role === 'assistant') {
       content.innerHTML = parseMarkdown(messageText(message));
+      const assistantIdx = session.messages.slice(0, session.messages.indexOf(message)).filter(m => m.role === 'assistant').length;
+      const matchingRun = (session.runs || [])[assistantIdx];
+      const matchingCitations = matchingRun ? runCitationsMap.get(matchingRun.id) : (assistantIdx === (session.runs || []).length - 1 ? runCitationsMap.get(currentRun?.id) : []);
+      if (matchingCitations && matchingCitations.length > 0) {
+        renderMessageCitations(content, matchingCitations, workspaceId);
+      }
     } else {
       content.textContent = messageText(message);
     }
@@ -439,6 +510,16 @@ function renderEvents() {
     element('live-text').innerHTML = '';
   } else {
     element('live-text').innerHTML = parseMarkdown(liveRaw);
+    const liveCitations = current
+      .filter(e => e.type === 'knowledge-used' && Array.isArray(e.citations))
+      .flatMap(e => e.citations);
+    if (liveCitations.length > 0) {
+      const unique = [];
+      liveCitations.forEach(c => {
+        if (!unique.some(u => u.citationId === c.citationId)) unique.push(c);
+      });
+      renderMessageCitations(element('live-text'), unique, workspaceId);
+    }
   }
 
   const details = all.filter(event => event.type !== 'text' && event.type !== 'reasoning');
@@ -2075,6 +2156,10 @@ element('delete-model-btn')?.addEventListener('click', async () => {
   } catch (err) {
     showTestStatus('error', `删除失败: ${err.message}`);
   }
+});
+
+element('open-knowledge-btn')?.addEventListener('click', () => {
+  location.hash = 'knowledge';
 });
 
 loadModels();

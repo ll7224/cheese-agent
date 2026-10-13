@@ -15,6 +15,7 @@ import { selectLocalDirectory } from './directory-picker.js';
 import { PROVIDER_PRESETS, testConnection, fetchRemoteModels } from '../runtime/model-store.js';
 import { SkillLoader } from '../skills/loader.js';
 import { DomainAgentRegistry } from '../agents/domain-registry.js';
+import { createKnowledgeRoutes } from './knowledge-routes.js';
 
 export function createApp(runtime: Runtime, chooseDirectory: () => Promise<string | null> = selectLocalDirectory) {
   const app = new Hono();
@@ -29,12 +30,22 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
     catch { return context.json({ error: '无效主机名' }, 403); }
     if (!local(url.hostname) || !local(host.hostname)) return context.json({ error: '仅允许本机访问' }, 403);
     if (origin && origin !== url.origin) return context.json({ error: '不允许跨站请求' }, 403);
-    if (!['GET', 'HEAD'].includes(context.req.method) && !context.req.header('content-type')?.includes('application/json')) return context.json({ error: '需要 JSON 请求' }, 415);
+    if (!['GET', 'HEAD', 'DELETE'].includes(context.req.method) && !context.req.header('content-type')?.includes('application/json')) return context.json({ error: '需要 JSON 请求' }, 415);
     if (!['GET', 'HEAD'].includes(context.req.method) && !context.req.path.endsWith('/stop')) {
-      let body: unknown;
-      try { body = await context.req.json(); }
-      catch { return context.json({ error: '无效 JSON 请求' }, 400); }
-      if (!body || typeof body !== 'object' || Array.isArray(body)) return context.json({ error: '请求必须为 JSON 对象' }, 400);
+      if (context.req.method === 'DELETE') {
+        const text = await context.req.text();
+        if (text.trim().length > 0) {
+          let body: unknown;
+          try { body = JSON.parse(text); }
+          catch { return context.json({ error: '无效 JSON 请求' }, 400); }
+          if (!body || typeof body !== 'object' || Array.isArray(body)) return context.json({ error: '请求必须为 JSON 对象' }, 400);
+        }
+      } else {
+        let body: unknown;
+        try { body = await context.req.json(); }
+        catch { return context.json({ error: '无效 JSON 请求' }, 400); }
+        if (!body || typeof body !== 'object' || Array.isArray(body)) return context.json({ error: '请求必须为 JSON 对象' }, 400);
+      }
     }
     await next();
   });
@@ -174,7 +185,29 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
     return context.json(runtime.submit(context.req.param('id'), body.text, body.key), 202);
   });
   app.post('/api/v1/runs/:id/stop', context => context.json(runtime.stop(context.req.param('id'))));
+  app.route('', createKnowledgeRoutes(runtime));
   app.all('/api/*', context => context.json({ error: '接口不存在' }, 404));
+
+  const knowledgeStaticFiles: Record<string, { path: string; mime: string }> = {
+    '/knowledge/controller.js': { path: '../../web/knowledge/controller.js', mime: 'text/javascript' },
+    '/knowledge/views.js': { path: '../../web/knowledge/views.js', mime: 'text/javascript' },
+    '/knowledge/citations.js': { path: '../../web/knowledge/citations.js', mime: 'text/javascript' },
+    '/knowledge/graph.js': { path: '../../web/knowledge/graph.js', mime: 'text/javascript' },
+    '/knowledge/style.css': { path: '../../web/knowledge/style.css', mime: 'text/css' },
+  };
+
+  for (const [routePath, config] of Object.entries(knowledgeStaticFiles)) {
+    app.get(routePath, context => {
+      try {
+        const content = readFileSync(new URL(config.path, import.meta.url), 'utf8');
+        return context.body(content, 200, { 'Content-Type': config.mime });
+      } catch {
+        return context.text('Not Found', 404);
+      }
+    });
+  }
+
+  app.get('/knowledge/*', context => context.text('Not Found', 404));
   app.get('/app.js', context => context.body(readFileSync(new URL('../../web/app.js', import.meta.url), 'utf8'), 200, { 'Content-Type': 'text/javascript' }));
   app.get('/style.css', context => context.body(readFileSync(new URL('../../web/style.css', import.meta.url), 'utf8'), 200, { 'Content-Type': 'text/css' }));
   app.get('/favicon.svg', context => context.body(readFileSync(new URL('../../web/favicon.svg', import.meta.url), 'utf8'), 200, { 'Content-Type': 'image/svg+xml' }));
