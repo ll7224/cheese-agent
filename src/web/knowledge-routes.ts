@@ -289,8 +289,7 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
       throw new RuntimeError('来源不存在', 404);
     }
 
-    const allLibs = runtime.knowledgeService.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(source.libraryId)) {
       throw new RuntimeError('无权访问此文档', 404);
     }
@@ -375,8 +374,7 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
       throw new RuntimeError('来源不存在', 404);
     }
 
-    const allLibs = runtime.knowledgeService.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(source.libraryId)) {
       throw new RuntimeError('无权访问此文档', 404);
     }
@@ -399,8 +397,7 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
       throw new RuntimeError('来源不存在', 404);
     }
 
-    const allLibs = runtime.knowledgeService.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(source.libraryId)) {
       throw new RuntimeError('无权访问此文档', 404);
     }
@@ -486,8 +483,7 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     if (!ent) {
       throw new RuntimeError('实体不存在', 404);
     }
-    const allLibs = runtime.knowledgeService.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(ent.libraryId)) {
       throw new RuntimeError('无权访问此实体', 404);
     }
@@ -550,8 +546,7 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     if (!item) {
       throw new RuntimeError('条目不存在', 404);
     }
-    const allLibs = runtime.knowledgeService.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(item.libraryId)) {
       throw new RuntimeError('无权访问此条目', 404);
     }

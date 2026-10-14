@@ -689,6 +689,13 @@ export class KnowledgeController {
               <option value="public">公共知识库 (public - 跨工作区可用)</option>
             </select>
           </div>
+          <div class="form-row" id="wrap-lib-role" style="display: none;">
+            <label>公共库类别</label>
+            <select id="kn-lib-role-select" class="form-select">
+              <option value="basic">公共基础库 (basic - 全局默认对所有 Agent 自动生效)</option>
+              <option value="domain">公共领域库 (domain - 专业领域沉淀，按需绑定或语义推荐)</option>
+            </select>
+          </div>
           <div class="form-actions">
             <button type="button" class="ghost-btn btn-close-modal">取消</button>
             <button type="submit" class="send-button">确认创建</button>
@@ -698,16 +705,29 @@ export class KnowledgeController {
     `;
 
     this.openModal(html, (dialog, closeModal) => {
+      const scopeSelect = dialog.querySelector('#kn-lib-scope-select');
+      const roleWrap = dialog.querySelector('#wrap-lib-role');
+      const roleSelect = dialog.querySelector('#kn-lib-role-select');
+
+      scopeSelect.addEventListener('change', () => {
+        if (scopeSelect.value === 'public') {
+          roleWrap.style.display = 'block';
+        } else {
+          roleWrap.style.display = 'none';
+        }
+      });
+
       dialog.querySelector('#kn-create-lib-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const name = dialog.querySelector('#kn-lib-name-input').value.trim();
         const description = dialog.querySelector('#kn-lib-desc-input').value.trim();
-        const scope = dialog.querySelector('#kn-lib-scope-select').value;
+        const scope = scopeSelect.value;
+        const role = scope === 'public' ? roleSelect.value : 'project';
 
         try {
           const created = await this.fetchApi('/libraries', {
             method: 'POST',
-            body: { name, description, scope },
+            body: { name, description, scope, role },
           });
           closeModal();
           if (created && created.id) {

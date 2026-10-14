@@ -383,11 +383,20 @@ export class KnowledgeService {
   }
 
   /**
+   * 获取当前工作区上下文允许管理/操作的知识库 ID 列表（包含本工作区项目库与所有全局公共库）
+   */
+  getManageableLibraryIds(ctx: KnowledgeContext): string[] {
+    const allLibs = this.store.listLibraries();
+    return allLibs
+      .filter((l) => (l.scope === 'project' && l.workspaceId === ctx.workspaceId) || l.scope === 'public')
+      .map((l) => l.id);
+  }
+
+  /**
    * 列出当前上下文可访问的沉淀条目
    */
   listItems(ctx: KnowledgeContext, status?: KnowledgeStatus): KnowledgeItem[] {
-    const allLibs = this.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = this.getManageableLibraryIds(ctx);
     return this.store.listKnowledgeItems({
       libraryIds: accessibleIds,
       status,
@@ -403,8 +412,7 @@ export class KnowledgeService {
       throw new Error(`Knowledge item not found: ${id}`);
     }
 
-    const allLibs = this.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = this.getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(existing.libraryId)) {
       throw new Error(`Access denied to knowledge item: ${id}`);
     }
@@ -495,8 +503,7 @@ export class KnowledgeService {
     if (!source) {
       throw new Error(`Source not found: ${doc.sourceId}`);
     }
-    const allLibs = this.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = this.getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(source.libraryId)) {
       throw new Error(`Access denied to document: ${documentId}`);
     }
@@ -551,10 +558,7 @@ export class KnowledgeService {
     libraryId?: string
   ): Promise<Array<{ documentId: string; sourceKey: string; items: ExtractedDocItemDraft[] }>> {
     const targetLibId = libraryId || `project:${ctx.workspaceId}`;
-    const allLibs = this.store.listLibraries();
-    const accessibleIds = allLibs
-      .filter((l) => (l.scope === 'project' && l.workspaceId === ctx.workspaceId) || l.scope === 'public')
-      .map((l) => l.id);
+    const accessibleIds = this.getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(targetLibId)) {
       throw new Error(`Access denied to library: ${targetLibId}`);
     }
@@ -655,8 +659,7 @@ export class KnowledgeService {
     if (!source) {
       throw new Error(`Source not found: ${doc.sourceId}`);
     }
-    const allLibs = this.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = this.getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(source.libraryId)) {
       throw new Error(`Access denied to document: ${documentId}`);
     }

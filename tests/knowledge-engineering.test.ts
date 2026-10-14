@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { createKnowledgeTestEnv } from './helpers/knowledge-fixture.js';
 import { KnowledgeService } from '../src/knowledge/service.js';
+import { chunkWithSpans } from '../src/knowledge/chunks.js';
 import type { KnowledgeContext, SearchRequest } from '../src/knowledge/types.js';
 import type { CaptureInput } from '../src/knowledge/capture.js';
 
@@ -497,5 +499,82 @@ export function handleLogin(username: string): boolean {
     expSearch.hits.some((h) => h.citation.documentId === committedItems[1].id),
     'experience 模式必须能召回 candidate 知识条目'
   );
+});
+
+test('P3-Scenario 11: 公共领域知识库文档管理、提炼与沉淀权限测试 (Manageable Public Domain Library Extraction)', async (t) => {
+  const env = createKnowledgeTestEnv(t);
+  const store = env.store;
+  const service = new KnowledgeService({ dataDir: env.tempDir, store });
+
+  const ctx: KnowledgeContext = {
+    workspaceId: 'ws-domain-test',
+    workspacePath: env.tempDir,
+    agentId: 'general',
+    role: 'owner',
+  };
+  service.attachWorkspace(ctx);
+
+  // 1. 创建一个公共领域库 (scope=public, role=domain)
+  const domainLib = store.createLibrary({
+    id: 'pub-test-domain-lib',
+    name: '公共领域知识库',
+    description: '用于测试领域知识库文档提取',
+    scope: 'public',
+    role: 'domain',
+    workspaceId: null,
+    enabled: true,
+  });
+
+  // 2. 向该领域库创建来源并发布一份 ADR 规范文档
+  const docMarkdown = `# 领域知识库规范
+## 架构决策 (Decision)
+- **ADR-101**: 生产环境数据库连接池大小必须统一设定为 20
+- **ADR-102**: 必须统一使用 AES-256 加密存储敏感字段
+`;
+
+  const source = store.createSource({
+    id: 'src-domain-docs',
+    libraryId: domainLib.id,
+    kind: 'managed',
+    locator: 'docs/domain-guidelines.md',
+    enabled: true,
+  });
+
+  const rawChunks = chunkWithSpans(docMarkdown);
+  const hash = crypto.createHash('sha256').update(docMarkdown).digest('hex');
+  const pubRes = store.publishRevision({
+    sourceId: source.id,
+    sourceKey: 'docs/domain-guidelines.md',
+    content: docMarkdown,
+    hash,
+    expectedPreviousRevisionId: null,
+    chunks: rawChunks.map((c) => ({
+      text: c.text,
+      span: c.span,
+      evidenceKind: 'document',
+    })),
+  });
+  const docId = pubRes.documentId;
+  assert.ok(docId, '公共领域库文档发布成功');
+
+  // 3. 验证：预览提取不会报 Access denied
+  const drafts = await service.previewExtractDocument(ctx, docId);
+  assert.ok(drafts.length >= 2, `应该成功提取至少 2 条草稿，实际提取到 ${drafts.length}`);
+  assert.ok(drafts.some((d) => d.text.includes('AES-256')));
+
+  // 4. 验证：批量预览也不会报 Access denied
+  const batchDrafts = await service.previewExtractAllDocs(ctx, domainLib.id);
+  assert.ok(batchDrafts.length >= 1);
+
+  // 5. 验证：确认入库不会报 Access denied
+  const committed = service.commitExtractedDocItems(ctx, docId, [
+    { ...drafts[0], status: 'effective' },
+  ]);
+  assert.equal(committed.length, 1);
+  assert.equal(committed[0].libraryId, domainLib.id);
+
+  // 6. 验证：listItems 在管理端能查出该公共领域库的条目
+  const items = service.listItems(ctx);
+  assert.ok(items.some((i) => i.id === committed[0].id), '管理端应能列出公共领域库中的沉淀条目');
 });
 
