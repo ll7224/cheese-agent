@@ -30,7 +30,7 @@ function ensureCitationDialog() {
             <span class="dialog-badge">资料引用溯源</span>
             <h2 id="citation-dialog-title">引用内容溯源与有效性</h2>
           </div>
-          <button class="icon-button" type="button" id="close-citation-dialog" aria-label="关闭引用弹窗">✕</button>
+          <button class="kn-btn-icon" type="button" id="close-citation-dialog" aria-label="关闭引用弹窗">✕</button>
         </div>
         <div id="citation-modal-body" class="citation-modal-body">
           <div class="loading-spinner">正在加载引用详情…</div>
@@ -67,7 +67,6 @@ export async function viewCitation(workspaceId, citationId) {
   } catch (err) {
     body.innerHTML = `
       <div class="citation-error-card">
-        <span class="error-icon">⚠️</span>
         <div class="error-msg">读取引用失败: ${escapeHtml(err.message)}</div>
       </div>
     `;
@@ -85,7 +84,7 @@ function renderCitationDetail(container, data, workspaceId) {
     : (citation.status === 'invalidated' ? '已失效 (已由新条目或版本替代)' : '候选 (待验证)');
   const currentBadge = current
     ? '<span class="status-badge-current">● 当前生效版本</span>'
-    : `<span class="status-badge-historic">⚠️ 历史版本 (当前生效: ${escapeHtml(currentRevisionId || '无')})</span>`;
+    : `<span class="status-badge-historic">历史版本 (当前生效: ${escapeHtml(currentRevisionId || '无')})</span>`;
 
   // 纯文本按行拆分并增加 1-based 行号，标记高亮行范围
   const lines = (content || '').split('\n');
@@ -107,7 +106,7 @@ function renderCitationDetail(container, data, workspaceId) {
   container.innerHTML = `
     <div class="citation-meta-card">
       <div class="citation-meta-row">
-        <span class="citation-uri" title="${escapeHtml(citation.sourceUri)}">📄 ${escapeHtml(citation.sourceUri)}</span>
+        <span class="citation-uri" title="${escapeHtml(citation.sourceUri)}">${escapeHtml(citation.sourceUri)}</span>
         <div class="citation-tags">
           <span class="citation-status-pill ${statusClass}">${statusLabel}</span>
           <span class="citation-kind-pill">${escapeHtml(citation.evidenceKind || 'document')}</span>
@@ -146,7 +145,7 @@ export function renderMessageCitations(container, citations, workspaceId) {
   const heading = document.createElement('div');
   heading.className = 'message-citations-heading';
   heading.innerHTML = `
-    <span class="citation-heading-icon">📚</span>
+    <span class="citation-heading-icon"><svg class="kn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2.5A1.5 1.5 0 0 1 4.5 1h5l4 4v8.5a1.5 1.5 0 0 1-1.5 1.5h-7.5A1.5 1.5 0 0 1 3 13.5v-11z"/><polyline points="9 1 9 5 13 5"/></svg></span>
     <span>知识溯源 (${citations.length} 处引用)</span>
   `;
   wrapper.appendChild(heading);

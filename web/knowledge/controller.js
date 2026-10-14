@@ -16,6 +16,17 @@ function escapeHtml(str) {
   }[m]));
 }
 
+function setBtnLoading(btn, isLoading, loadingText, defaultText) {
+  if (!btn) return;
+  btn.disabled = isLoading;
+  const label = btn.querySelector('span');
+  if (label) {
+    label.textContent = isLoading ? loadingText : defaultText;
+  } else {
+    btn.textContent = isLoading ? loadingText : defaultText;
+  }
+}
+
 export class KnowledgeController {
   constructor(mountElement, getWorkspaceId, getAvailableAgents) {
     this.mountElement = mountElement;
@@ -145,8 +156,7 @@ export class KnowledgeController {
       importLegacyBtn.addEventListener('click', async () => {
         const pathInput = prompt('请输入旧版 SQLite 知识库路径（留空则默认读取 .cheese-knowledge/knowledge.db）：', '');
         if (pathInput === null) return;
-        importLegacyBtn.disabled = true;
-        importLegacyBtn.textContent = '导入中…';
+        setBtnLoading(importLegacyBtn, true, '导入中…', '导入旧版知识库');
         try {
           const res = await this.fetchApi('/legacy/import', {
             method: 'POST',
@@ -159,8 +169,7 @@ export class KnowledgeController {
         } catch (err) {
           alert('导入旧版知识库失败: ' + err.message);
         } finally {
-          importLegacyBtn.disabled = false;
-          importLegacyBtn.textContent = '📥 导入旧版知识库';
+          setBtnLoading(importLegacyBtn, false, '导入中…', '导入旧版知识库');
         }
       });
     }
@@ -169,8 +178,7 @@ export class KnowledgeController {
     const scanDocsBtn = c.querySelector('#kn-scan-docs-toolbar-btn');
     if (scanDocsBtn) {
       scanDocsBtn.addEventListener('click', async () => {
-        scanDocsBtn.disabled = true;
-        scanDocsBtn.textContent = '正在扫描并同步 docs…';
+        setBtnLoading(scanDocsBtn, true, '正在扫描并同步 docs…', '扫描并同步 docs/');
         try {
           await this.fetchApi('/sources', {
             method: 'POST',
@@ -188,8 +196,7 @@ export class KnowledgeController {
         } catch (err) {
           alert('扫描并同步 docs 失败: ' + err.message);
         } finally {
-          scanDocsBtn.disabled = false;
-          scanDocsBtn.textContent = '📁 扫描并同步 docs/';
+          setBtnLoading(scanDocsBtn, false, '正在扫描并同步 docs…', '扫描并同步 docs/');
         }
       });
     }
@@ -344,10 +351,10 @@ export class KnowledgeController {
         tbody.innerHTML = `
           <tr>
             <td colspan="6" class="table-empty">
-              <div style="padding: 16px 0; text-align: center;">
-                <p style="margin: 0 0 6px 0; font-weight: 500;">当前知识库暂无已索引文档记录</p>
-                <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 12px 0;">系统支持一键扫描工程 docs/ 目录并自动建立知识切片索引与提炼。</p>
-                <button id="kn-quick-sync-docs-btn" class="action-tag-btn" type="button">📁 一键扫描并同步 docs 目录</button>
+              <div style="padding: 24px 0; text-align: center;">
+                <p style="margin: 0 0 6px 0; font-weight: 500; font-size: 14px; color: var(--text);">当前知识库暂无已索引文档记录</p>
+                <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 14px 0;">系统支持一键扫描工程 docs/ 目录并自动建立知识切片索引与提炼。</p>
+                <button id="kn-quick-sync-docs-btn" class="kn-btn kn-btn-primary kn-btn-sm" type="button">一键扫描并同步 docs/ 目录</button>
               </div>
             </td>
           </tr>
@@ -373,7 +380,7 @@ export class KnowledgeController {
             } catch (err) {
               alert('同步 docs 目录失败: ' + err.message);
               syncDocsBtn.disabled = false;
-              syncDocsBtn.textContent = '📁 一键扫描并同步 docs 目录';
+              syncDocsBtn.textContent = '一键扫描并同步 docs/ 目录';
             }
           });
         }
@@ -643,6 +650,9 @@ export class KnowledgeController {
         },
       });
 
+      const countChip = this.container.querySelector('#kn-search-count-chip');
+      if (countChip) countChip.textContent = `${res.hits ? res.hits.length : 0} 条匹配`;
+
       if (!res.hits || res.hits.length === 0) {
         hitsList.innerHTML = '<div class="table-empty">没有匹配到相关工程知识</div>';
         return;
@@ -655,8 +665,8 @@ export class KnowledgeController {
         item.className = 'search-hit-item';
         item.innerHTML = `
           <div class="hit-header">
-            <span class="hit-score">#${idx + 1} 得分: ${h.score.toFixed(3)}</span>
-            <span class="hit-uri">📄 ${escapeHtml(c.sourceUri)}</span>
+            <span class="hit-score">#${idx + 1} 相似度: ${h.score.toFixed(3)}</span>
+            <span class="hit-uri">${escapeHtml(c.sourceUri)}</span>
             <span class="citation-status-pill status-pill-${c.status}">${escapeHtml(c.status)}</span>
             <button class="mini-btn btn-view-citation action-tag-btn" type="button">查看溯源</button>
           </div>
@@ -735,7 +745,7 @@ export class KnowledgeController {
             <span class="dialog-badge">创建知识库</span>
             <h2>新建工程知识库</h2>
           </div>
-          <button class="icon-button btn-close-modal" type="button">✕</button>
+          <button class="kn-btn-icon btn-close-modal" type="button" aria-label="关闭">✕</button>
         </div>
         <form id="kn-create-lib-form" class="kn-form">
           <div class="form-row">
@@ -755,7 +765,7 @@ export class KnowledgeController {
           </div>
           <div class="form-row" id="wrap-lib-workspaces">
             <label>生效工作区 (自主多选共享)</label>
-            <div id="kn-create-workspaces-list" class="binding-libs-list" style="max-height: 140px; overflow-y: auto; padding: 6px; border: 1px solid var(--border-color); border-radius: 4px;">
+            <div id="kn-create-workspaces-list" class="binding-libs-list" style="max-height: 140px; overflow-y: auto; padding: 6px;">
               <span style="font-size: 12px; color: var(--text-muted);">正在加载工作区列表…</span>
             </div>
             <span class="form-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
@@ -771,7 +781,7 @@ export class KnowledgeController {
           </div>
           <div class="form-actions">
             <button type="button" class="ghost-btn btn-close-modal">取消</button>
-            <button type="submit" class="send-button">确认创建</button>
+            <button type="submit" class="kn-btn kn-btn-primary">确认创建</button>
           </div>
         </form>
       </dialog>
@@ -802,8 +812,8 @@ export class KnowledgeController {
             return `
               <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; cursor: pointer;">
                 <input type="checkbox" name="workspace-id" value="${escapeHtml(w.id)}" ${isCurrent ? 'checked' : ''} />
-                <span>${escapeHtml(name)} ${isCurrent ? '<strong style="color: var(--accent-color); font-size: 11px;">(当前)</strong>' : ''}</span>
-                <span style="color: var(--text-muted); font-size: 11px; margin-left: auto;">${escapeHtml(w.path || '')}</span>
+                <span>${escapeHtml(name)} ${isCurrent ? '<strong style="color: var(--accent); font-size: 11px;">(当前)</strong>' : ''}</span>
+                <span style="color: var(--text-muted); font-size: 11px; margin-left: auto; font-family: var(--font-mono);">${escapeHtml(w.path || '')}</span>
               </label>
             `;
           }).join('');
@@ -896,15 +906,15 @@ export class KnowledgeController {
             <span class="dialog-badge">工作区关联</span>
             <h2>绑定工作区 - ${escapeHtml(lib.name)}</h2>
           </div>
-          <button class="icon-button btn-close-modal" type="button">✕</button>
+          <button class="kn-btn-icon btn-close-modal" type="button" aria-label="关闭">✕</button>
         </div>
         <form id="kn-ws-binding-form" class="kn-form">
-          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+          <p style="font-size: 13px; color: var(--text-secondary); margin: 0 0 12px 0; line-height: 1.5;">
             勾选的工作区可共同访问、管理与提炼沉淀此知识库。支持跨工作区自主共享。
           </p>
           <div class="form-row">
             <label>生效工作区列表 (可多选)</label>
-            <div id="kn-edit-workspaces-list" class="binding-libs-list" style="max-height: 220px; overflow-y: auto; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px;">
+            <div id="kn-edit-workspaces-list" class="binding-libs-list" style="max-height: 220px; overflow-y: auto; padding: 8px;">
               ${allWorkspaces.length === 0 ? `
                 <label style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
                   <input type="checkbox" name="bind-ws-id" value="${escapeHtml(this.workspaceId)}" checked />
@@ -917,8 +927,8 @@ export class KnowledgeController {
                 return `
                   <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; cursor: pointer;">
                     <input type="checkbox" name="bind-ws-id" value="${escapeHtml(w.id)}" ${isChecked ? 'checked' : ''} />
-                    <span>${escapeHtml(name)} ${isCurrent ? '<strong style="color: var(--accent-color); font-size: 11px;">(当前)</strong>' : ''}</span>
-                    <span style="color: var(--text-muted); font-size: 11px; margin-left: auto;">${escapeHtml(w.path || '')}</span>
+                    <span>${escapeHtml(name)} ${isCurrent ? '<strong style="color: var(--accent); font-size: 11px;">(当前)</strong>' : ''}</span>
+                    <span style="color: var(--text-muted); font-size: 11px; margin-left: auto; font-family: var(--font-mono);">${escapeHtml(w.path || '')}</span>
                   </label>
                 `;
               }).join('')}
@@ -926,7 +936,7 @@ export class KnowledgeController {
           </div>
           <div class="form-actions">
             <button type="button" class="ghost-btn btn-close-modal">取消</button>
-            <button type="submit" class="send-button">保存绑定</button>
+            <button type="submit" class="kn-btn kn-btn-primary">保存绑定</button>
           </div>
         </form>
       </dialog>
@@ -965,7 +975,7 @@ export class KnowledgeController {
             <span class="dialog-badge">资料导入</span>
             <h2>向项目库导入工程文档</h2>
           </div>
-          <button class="icon-button btn-close-modal" type="button">✕</button>
+          <button class="kn-btn-icon btn-close-modal" type="button" aria-label="关闭">✕</button>
         </div>
         <form id="kn-import-doc-form" class="kn-form">
           <div class="form-row">
@@ -989,7 +999,7 @@ export class KnowledgeController {
           </div>
           <div class="form-actions">
             <button type="button" class="ghost-btn btn-close-modal">取消</button>
-            <button type="submit" class="send-button">导入并发布</button>
+            <button type="submit" class="kn-btn kn-btn-primary">导入并发布</button>
           </div>
         </form>
       </dialog>
@@ -1038,7 +1048,7 @@ export class KnowledgeController {
             <span class="dialog-badge">编辑文档版本</span>
             <h2>更新文档内容</h2>
           </div>
-          <button class="icon-button btn-close-modal" type="button">✕</button>
+          <button class="kn-btn-icon btn-close-modal" type="button" aria-label="关闭">✕</button>
         </div>
         <form id="kn-edit-doc-form" class="kn-form">
           <p class="dialog-desc">
@@ -1050,7 +1060,7 @@ export class KnowledgeController {
           </div>
           <div class="form-actions">
             <button type="button" class="ghost-btn btn-close-modal">取消</button>
-            <button type="submit" class="send-button">发布新版本</button>
+            <button type="submit" class="kn-btn kn-btn-primary">发布新版本</button>
           </div>
         </form>
       </dialog>
@@ -1099,7 +1109,7 @@ export class KnowledgeController {
             <span class="dialog-badge">版本历史</span>
             <h2>${escapeHtml(doc.sourceKey)} 的版本链</h2>
           </div>
-          <button class="icon-button btn-close-modal" type="button">✕</button>
+          <button class="kn-btn-icon btn-close-modal" type="button" aria-label="关闭">✕</button>
         </div>
         <div class="revisions-list-body">
           <div class="loading-spinner">加载版本列表中…</div>
@@ -1178,7 +1188,7 @@ export class KnowledgeController {
             <span class="dialog-badge">添加来源</span>
             <h2>接入新的工程知识源</h2>
           </div>
-          <button class="icon-button btn-close-modal" type="button">✕</button>
+          <button class="kn-btn-icon btn-close-modal" type="button" aria-label="关闭">✕</button>
         </div>
         <form id="kn-add-source-form" class="kn-form">
           <div class="form-row">
@@ -1199,14 +1209,14 @@ export class KnowledgeController {
             <input id="kn-source-locator" class="form-input" required placeholder="例如: docs 或 src 或 README.md" />
           </div>
           <div class="form-row-checkbox">
-            <label class="checkbox-label">
-              <input type="checkbox" id="kn-source-enabled" checked />
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" id="kn-source-enabled" checked style="accent-color: var(--accent);" />
               <span>添加后立即启用并启动监听同步</span>
             </label>
           </div>
           <div class="form-actions">
             <button type="button" class="ghost-btn btn-close-modal">取消</button>
-            <button type="submit" class="send-button">确认添加</button>
+            <button type="submit" class="kn-btn kn-btn-primary">确认添加</button>
           </div>
         </form>
       </dialog>
@@ -1296,12 +1306,12 @@ export class KnowledgeController {
             <span class="dialog-badge">知识纠错</span>
             <h2>纠正沉淀条目</h2>
           </div>
-          <button class="icon-button btn-close-modal" type="button">✕</button>
+          <button class="kn-btn-icon btn-close-modal" type="button" aria-label="关闭">✕</button>
         </div>
         <form id="kn-correct-item-form" class="kn-form">
           <div class="form-row">
             <label>原条目内容</label>
-            <div class="form-readonly-text" style="padding: 8px 12px; background: var(--bg-hover, rgba(0,0,0,0.05)); border-radius: 4px; font-size: 13px;">${escapeHtml(item.text)}</div>
+            <div class="form-readonly-text" style="padding: 10px 12px; background: var(--panel-sunken); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; line-height: 1.5;">${escapeHtml(item.text)}</div>
           </div>
           <div class="form-row">
             <label>纠正后的新结论 / 文本</label>
@@ -1309,7 +1319,7 @@ export class KnowledgeController {
           </div>
           <div class="form-actions">
             <button type="button" class="ghost-btn btn-close-modal">取消</button>
-            <button type="submit" class="send-button">确认纠错</button>
+            <button type="submit" class="kn-btn kn-btn-primary">确认纠错</button>
           </div>
         </form>
       </dialog>
@@ -1343,21 +1353,21 @@ export class KnowledgeController {
             <span class="dialog-badge">知识提炼与沉淀</span>
             <h2>提炼文档知识: ${escapeHtml(doc.sourceKey)}</h2>
           </div>
-          <button class="icon-button btn-close-modal" type="button">✕</button>
+          <button class="kn-btn-icon btn-close-modal" type="button" aria-label="关闭">✕</button>
         </div>
         <div class="extract-review-banner">
-          <span>💡 默认设为待验证候选（candidate），防止过时文档污染事实检索；勾选并确认后入库。</span>
+          <span>默认设为待验证候选（candidate），防止过时文档污染事实检索；勾选并确认后入库。</span>
           <div class="extract-batch-actions">
-            <button type="button" class="mini-text-btn btn-select-all">全选</button>
-            <button type="button" class="mini-text-btn btn-deselect-all">反选</button>
+            <button type="button" class="mini-btn btn-select-all">全选</button>
+            <button type="button" class="mini-btn btn-deselect-all">反选</button>
           </div>
         </div>
         <div class="extract-body-container">
           <div class="loading-spinner">正在分析文档结构并提炼核心决议、规范与经验…</div>
         </div>
-        <div class="form-actions" style="margin-top: 16px;">
+        <div class="form-actions">
           <button type="button" class="ghost-btn btn-close-modal">取消</button>
-          <button type="button" id="kn-btn-commit-extract" class="send-button" disabled>确认入库 (0 条)</button>
+          <button type="button" id="kn-btn-commit-extract" class="kn-btn kn-btn-primary" disabled>确认入库 (0 条)</button>
         </div>
       </dialog>
     `;
@@ -1390,7 +1400,7 @@ export class KnowledgeController {
           card.dataset.index = idx;
 
           const entityBadges = (draft.matchedEntityNames || [])
-            .map((name) => `<span class="entity-badge">🏷️ ${escapeHtml(name)}</span>`)
+            .map((name) => `<span class="entity-badge"># ${escapeHtml(name)}</span>`)
             .join('');
 
           card.innerHTML = `
@@ -1493,21 +1503,21 @@ export class KnowledgeController {
             <span class="dialog-badge">批量知识提炼</span>
             <h2>工作区文档批量提炼与沉淀</h2>
           </div>
-          <button class="icon-button btn-close-modal" type="button">✕</button>
+          <button class="kn-btn-icon btn-close-modal" type="button" aria-label="关闭">✕</button>
         </div>
         <div class="extract-review-banner">
-          <span>💡 扫描工作区工程文档并提炼规则，确认后批量持久化并关联代码图谱。</span>
+          <span>扫描工作区工程文档并提炼规则，确认后批量持久化并关联代码图谱。</span>
           <div class="extract-batch-actions">
-            <button type="button" class="mini-text-btn btn-select-all">全选</button>
-            <button type="button" class="mini-text-btn btn-deselect-all">反选</button>
+            <button type="button" class="mini-btn btn-select-all">全选</button>
+            <button type="button" class="mini-btn btn-deselect-all">反选</button>
           </div>
         </div>
         <div class="extract-body-container">
           <div class="loading-spinner">正在扫描工作区所有技术文档…</div>
         </div>
-        <div class="form-actions" style="margin-top: 16px;">
+        <div class="form-actions">
           <button type="button" class="ghost-btn btn-close-modal">取消</button>
-          <button type="button" id="kn-btn-commit-batch-extract" class="send-button" disabled>确认批量入库 (0 条)</button>
+          <button type="button" id="kn-btn-commit-batch-extract" class="kn-btn kn-btn-primary" disabled>确认批量入库 (0 条)</button>
         </div>
       </dialog>
     `;
@@ -1541,7 +1551,7 @@ export class KnowledgeController {
 
           const groupHeader = document.createElement('div');
           groupHeader.className = 'draft-group-header';
-          groupHeader.innerHTML = `📄 <strong>${escapeHtml(docRes.sourceKey)}</strong> <span style="font-size: 11px; color: var(--text-muted); font-weight: normal;">(${docRes.items.length} 条)</span>`;
+          groupHeader.innerHTML = `<strong>${escapeHtml(docRes.sourceKey)}</strong> <span style="font-size: 11px; color: var(--text-muted); font-weight: normal;">(${docRes.items.length} 条)</span>`;
           batchList.appendChild(groupHeader);
 
           docRes.items.forEach((draft, idx) => {
@@ -1551,7 +1561,7 @@ export class KnowledgeController {
             card.dataset.index = idx;
 
             const entityBadges = (draft.matchedEntityNames || [])
-              .map((name) => `<span class="entity-badge">🏷️ ${escapeHtml(name)}</span>`)
+              .map((name) => `<span class="entity-badge"># ${escapeHtml(name)}</span>`)
               .join('');
 
             card.innerHTML = `
