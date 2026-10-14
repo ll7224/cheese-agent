@@ -3,7 +3,14 @@ import crypto from 'node:crypto';
 import type { Runtime } from '../runtime/service.js';
 import { RuntimeError } from '../runtime/service.js';
 import type { KnowledgeContext, SearchRequest } from '../knowledge/types.js';
-import { bindAgentLibraries, getAgentLibraryIds, resolveLibraries } from '../knowledge/libraries.js';
+import {
+  bindAgentLibraries,
+  getAgentLibraryIds,
+  resolveLibraries,
+  getLibraryWorkspaceIds,
+  bindLibraryWorkspaces,
+  getWorkspaceLibraryIds,
+} from '../knowledge/libraries.js';
 import { chunkWithSpans } from '../knowledge/chunks.js';
 import { getExecutionEvidence } from '../knowledge/evidence.js';
 import { getProviderStatus, Context7Provider } from '../knowledge/providers.js';
@@ -34,10 +41,7 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
   }
 
   function getManageableLibraryIds(ctx: KnowledgeContext): string[] {
-    const allLibs = runtime.knowledgeService.store.listLibraries();
-    return allLibs
-      .filter((l) => (l.scope === 'project' && l.workspaceId === ctx.workspaceId) || l.scope === 'public')
-      .map((l) => l.id);
+    return runtime.knowledgeService.getManageableLibraryIds(ctx);
   }
 
   // 1. GET/POST /api/v1/workspaces/:id/knowledge/libraries
@@ -76,7 +80,86 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
       role,
     });
 
-    return context.json(created, 201);
+    if (scope === 'project') {
+      let targetWorkspaceIds = Array.isArray(body.workspaceIds) && body.workspaceIds.length > 0
+        ? Array.from(new Set((body.workspaceIds as string[]).filter((id) => typeof id === 'string' && id.trim().length > 0)))
+        : [ctx.workspaceId];
+      if (!targetWorkspaceIds.includes(ctx.workspaceId)) {
+        targetWorkspaceIds = [ctx.workspaceId, ...targetWorkspaceIds];
+      }
+      bindLibraryWorkspaces(runtime.knowledgeService.store.db, created.id, targetWorkspaceIds);
+    }
+
+    const returnedLib = runtime.knowledgeService.store.getLibrary(created.id);
+    return context.json(returnedLib || created, 201);
+  });
+
+  // 1.1 GET/PUT /api/v1/workspaces/:id/knowledge/libraries/:libraryId/workspaces
+  routes.get('/api/v1/workspaces/:id/knowledge/libraries/:libraryId/workspaces', (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const libraryId = context.req.param('libraryId');
+    const lib = runtime.knowledgeService.store.getLibrary(libraryId);
+    if (!lib) {
+      throw new RuntimeError('知识库不存在', 404);
+    }
+    const manageableIds = getManageableLibraryIds(ctx);
+    if (!manageableIds.includes(libraryId)) {
+      throw new RuntimeError('无权访问此知识库', 403);
+    }
+
+    const boundWorkspaceIds = getLibraryWorkspaceIds(runtime.knowledgeService.store.db, libraryId);
+    const effectiveWorkspaceIds = lib.workspaceId && !boundWorkspaceIds.includes(lib.workspaceId)
+      ? [lib.workspaceId, ...boundWorkspaceIds]
+      : boundWorkspaceIds;
+
+    return context.json({
+      libraryId,
+      scope: lib.scope,
+      workspaceIds: effectiveWorkspaceIds,
+    });
+  });
+
+  routes.put('/api/v1/workspaces/:id/knowledge/libraries/:libraryId/workspaces', async (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const libraryId = context.req.param('libraryId');
+    const lib = runtime.knowledgeService.store.getLibrary(libraryId);
+    if (!lib) {
+      throw new RuntimeError('知识库不存在', 404);
+    }
+    const manageableIds = getManageableLibraryIds(ctx);
+    if (!manageableIds.includes(libraryId)) {
+      throw new RuntimeError('无权访问此知识库', 403);
+    }
+
+    const body = await context.req.json();
+    if (!Array.isArray(body.workspaceIds)) {
+      return context.json({ error: 'workspaceIds 必须为字符串数组' }, 400);
+    }
+
+    const cleanWorkspaceIds = body.workspaceIds.filter(
+      (id: unknown) => typeof id === 'string' && id.trim().length > 0
+    );
+
+    if (lib.scope === 'project' && cleanWorkspaceIds.length === 0) {
+      return context.json({ error: '项目专属库必须至少关联一个工作区' }, 400);
+    }
+
+    // 验证目标工作区是否存在
+    const availableWorkspaces = runtime.listWorkspaces();
+    const availableWsIds = new Set(availableWorkspaces.map((w: any) => w.id));
+    for (const wsId of cleanWorkspaceIds) {
+      if (!availableWsIds.has(wsId)) {
+        return context.json({ error: `目标工作区不存在: ${wsId}` }, 400);
+      }
+    }
+
+    bindLibraryWorkspaces(runtime.knowledgeService.store.db, libraryId, cleanWorkspaceIds);
+    const updated = getLibraryWorkspaceIds(runtime.knowledgeService.store.db, libraryId);
+    return context.json({
+      libraryId,
+      scope: lib.scope,
+      workspaceIds: updated,
+    });
   });
 
   // 2. GET/POST /api/v1/workspaces/:id/knowledge/sources

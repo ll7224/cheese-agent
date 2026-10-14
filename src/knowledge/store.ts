@@ -48,6 +48,22 @@ export class KnowledgeStore {
       input.role,
       createdAt
     );
+
+    if (input.workspaceId) {
+      this.db.prepare(`
+        INSERT OR IGNORE INTO workspace_bindings (workspace_id, library_id) VALUES (?, ?)
+      `).run(input.workspaceId, input.id);
+    }
+    if (input.workspaceIds) {
+      for (const wsId of input.workspaceIds) {
+        if (wsId && wsId.trim()) {
+          this.db.prepare(`
+            INSERT OR IGNORE INTO workspace_bindings (workspace_id, library_id) VALUES (?, ?)
+          `).run(wsId.trim(), input.id);
+        }
+      }
+    }
+
     return { ...input, createdAt };
   }
 
@@ -57,12 +73,20 @@ export class KnowledgeStore {
   getLibrary(id: string): Library | null {
     const row = this.db.prepare(`SELECT * FROM libraries WHERE id = ?`).get(id) as any;
     if (!row) return null;
+
+    const wsRows = this.db.prepare(`SELECT workspace_id FROM workspace_bindings WHERE library_id = ?`).all(id) as Array<{ workspace_id: string }>;
+    const workspaceIds = wsRows.map((r) => r.workspace_id);
+    if (row.workspace_id && !workspaceIds.includes(row.workspace_id)) {
+      workspaceIds.push(row.workspace_id);
+    }
+
     return {
       id: row.id,
       name: row.name,
       description: row.description,
       scope: row.scope,
       workspaceId: row.workspace_id || undefined,
+      workspaceIds,
       role: row.role,
       createdAt: row.created_at,
     };
@@ -75,20 +99,39 @@ export class KnowledgeStore {
     let rows: any[];
     if (workspaceId) {
       rows = this.db.prepare(`
-        SELECT * FROM libraries WHERE workspace_id = ? OR scope = 'public' ORDER BY created_at ASC
-      `).all(workspaceId);
+        SELECT DISTINCT l.* FROM libraries l
+        LEFT JOIN workspace_bindings wb ON l.id = wb.library_id
+        WHERE l.workspace_id = ? OR wb.workspace_id = ? OR l.scope = 'public'
+        ORDER BY l.created_at ASC
+      `).all(workspaceId, workspaceId);
     } else {
       rows = this.db.prepare(`SELECT * FROM libraries ORDER BY created_at ASC`).all();
     }
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      scope: row.scope,
-      workspaceId: row.workspace_id || undefined,
-      role: row.role,
-      createdAt: row.created_at,
-    }));
+
+    const wsMap = new Map<string, string[]>();
+    const allBindings = this.db.prepare(`SELECT workspace_id, library_id FROM workspace_bindings`).all() as Array<{ workspace_id: string; library_id: string }>;
+    for (const b of allBindings) {
+      const arr = wsMap.get(b.library_id) || [];
+      arr.push(b.workspace_id);
+      wsMap.set(b.library_id, arr);
+    }
+
+    return rows.map((row) => {
+      const boundWs = wsMap.get(row.id) || [];
+      if (row.workspace_id && !boundWs.includes(row.workspace_id)) {
+        boundWs.push(row.workspace_id);
+      }
+      return {
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        scope: row.scope,
+        workspaceId: row.workspace_id || undefined,
+        workspaceIds: boundWs,
+        role: row.role,
+        createdAt: row.created_at,
+      };
+    });
   }
 
   /**
@@ -331,7 +374,13 @@ export class KnowledgeStore {
       // 6.1 代码结构索引（共用同一事务发布与更新）
       if (input.codeIndex) {
         const libRow = this.db.prepare(`SELECT workspace_id FROM libraries WHERE id = ?`).get(source.libraryId) as any;
-        const workspaceId = libRow?.workspace_id || '';
+        let workspaceId = libRow?.workspace_id || '';
+        if (!workspaceId) {
+          const wsBindRow = this.db.prepare(`SELECT workspace_id FROM workspace_bindings WHERE library_id = ? LIMIT 1`).get(source.libraryId) as any;
+          if (wsBindRow?.workspace_id) {
+            workspaceId = wsBindRow.workspace_id;
+          }
+        }
         this.applyCodeIndexTx(source.libraryId, workspaceId, revisionId, doc.activeRevisionId, input.codeIndex);
       }
 

@@ -51,9 +51,18 @@ export class KnowledgeController {
     c.querySelector('#kn-lib-select').addEventListener('change', (e) => {
       this.currentLibraryId = e.target.value;
       this.docPage = 0;
+      this.updateScopeBadge();
       this.loadDocuments();
       this.loadSources();
     });
+
+    // 绑定工作区按钮
+    const manageWsBtn = c.querySelector('#kn-manage-workspaces-btn');
+    if (manageWsBtn) {
+      manageWsBtn.addEventListener('click', () => {
+        this.showWorkspaceBindingsDialog();
+      });
+    }
 
     // 新建库按钮
     c.querySelector('#kn-create-lib-btn').addEventListener('click', () => {
@@ -253,10 +262,24 @@ export class KnowledgeController {
         this.currentLibraryId = this.libraries[0].id;
       }
       select.value = this.currentLibraryId;
+      this.updateScopeBadge();
 
       await Promise.all([this.loadDocuments(), this.loadSources(), this.loadDiscoveries()]);
     } catch (err) {
       console.error('加载知识库列表失败:', err);
+    }
+  }
+
+  updateScopeBadge() {
+    const currentLib = this.libraries?.find((l) => l.id === this.currentLibraryId);
+    const scopeBadge = this.container?.querySelector('#kn-scope-badge');
+    if (scopeBadge && currentLib) {
+      if (currentLib.scope === 'public') {
+        scopeBadge.textContent = currentLib.role === 'basic' ? '公共基础库 (全局)' : '公共领域库 (全局)';
+      } else {
+        const wsCount = currentLib.workspaceIds?.length || 1;
+        scopeBadge.textContent = wsCount > 1 ? `项目库 (多工作区: ${wsCount})` : '当前工作区项目库';
+      }
     }
   }
 
@@ -685,9 +708,18 @@ export class KnowledgeController {
           <div class="form-row">
             <label>知识库作用域</label>
             <select id="kn-lib-scope-select" class="form-select">
-              <option value="project">项目专属库 (project - 仅限当前工作区)</option>
+              <option value="project">项目专属库 (project - 自主绑定工作区)</option>
               <option value="public">公共知识库 (public - 跨工作区可用)</option>
             </select>
+          </div>
+          <div class="form-row" id="wrap-lib-workspaces">
+            <label>生效工作区 (自主多选共享)</label>
+            <div id="kn-create-workspaces-list" class="binding-libs-list" style="max-height: 140px; overflow-y: auto; padding: 6px; border: 1px solid var(--border-color); border-radius: 4px;">
+              <span style="font-size: 12px; color: var(--text-muted);">正在加载工作区列表…</span>
+            </div>
+            <span class="form-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+              勾选的工作区均可访问、管理与沉淀本知识库。默认已勾选当前工作区。
+            </span>
           </div>
           <div class="form-row" id="wrap-lib-role" style="display: none;">
             <label>公共库类别</label>
@@ -708,12 +740,49 @@ export class KnowledgeController {
       const scopeSelect = dialog.querySelector('#kn-lib-scope-select');
       const roleWrap = dialog.querySelector('#wrap-lib-role');
       const roleSelect = dialog.querySelector('#kn-lib-role-select');
+      const wsWrap = dialog.querySelector('#wrap-lib-workspaces');
+      const wsList = dialog.querySelector('#kn-create-workspaces-list');
+
+      // 异步加载所有工作区列表以供自主勾选
+      fetch('/api/v1/workspaces')
+        .then((r) => r.json())
+        .then((workspaces) => {
+          if (!wsList) return;
+          if (!Array.isArray(workspaces) || workspaces.length === 0) {
+            wsList.innerHTML = `<label style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
+              <input type="checkbox" name="workspace-id" value="${escapeHtml(this.workspaceId)}" checked />
+              当前工作区 (${escapeHtml(this.workspaceId)})
+            </label>`;
+            return;
+          }
+          wsList.innerHTML = workspaces.map((w) => {
+            const isCurrent = w.id === this.workspaceId;
+            const name = w.name || w.path || w.id;
+            return `
+              <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; cursor: pointer;">
+                <input type="checkbox" name="workspace-id" value="${escapeHtml(w.id)}" ${isCurrent ? 'checked' : ''} />
+                <span>${escapeHtml(name)} ${isCurrent ? '<strong style="color: var(--accent-color); font-size: 11px;">(当前)</strong>' : ''}</span>
+                <span style="color: var(--text-muted); font-size: 11px; margin-left: auto;">${escapeHtml(w.path || '')}</span>
+              </label>
+            `;
+          }).join('');
+        })
+        .catch(() => {
+          if (wsList) {
+            wsList.innerHTML = `<label style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
+              <input type="checkbox" name="workspace-id" value="${escapeHtml(this.workspaceId)}" checked />
+              当前工作区 (${escapeHtml(this.workspaceId)})
+            </label>`;
+          }
+        });
 
       scopeSelect.addEventListener('change', () => {
         if (scopeSelect.value === 'public') {
           roleWrap.style.display = 'block';
+          wsWrap.style.display = 'none';
         } else {
           roleWrap.style.display = 'none';
+          wsWrap.style.display = 'block';
         }
       });
 
@@ -724,10 +793,22 @@ export class KnowledgeController {
         const scope = scopeSelect.value;
         const role = scope === 'public' ? roleSelect.value : 'project';
 
+        const checkedWs = Array.from(dialog.querySelectorAll('input[name="workspace-id"]:checked')).map((el) => el.value);
+        if (scope === 'project' && checkedWs.length === 0) {
+          alert('项目专属库至少需要勾选一个生效工作区');
+          return;
+        }
+
         try {
           const created = await this.fetchApi('/libraries', {
             method: 'POST',
-            body: { name, description, scope, role },
+            body: {
+              name,
+              description,
+              scope,
+              role,
+              workspaceIds: scope === 'project' ? checkedWs : undefined,
+            },
           });
           closeModal();
           if (created && created.id) {
@@ -737,6 +818,98 @@ export class KnowledgeController {
           alert(`知识库「${created.name}」创建成功！已切换为当前工作知识库。`);
         } catch (err) {
           alert('创建知识库失败: ' + err.message);
+        }
+      });
+    });
+  }
+
+  async showWorkspaceBindingsDialog() {
+    const lib = this.libraries.find((l) => l.id === this.currentLibraryId);
+    if (!lib) {
+      alert('请先选择一个知识库');
+      return;
+    }
+    if (lib.scope === 'public') {
+      alert(`「${lib.name}」是公共知识库（public），已全局对系统所有工作区开放生效，无需单独配置工作区绑定。`);
+      return;
+    }
+
+    let allWorkspaces = [];
+    let boundWsIds = [];
+    try {
+      const [wsRes, bindingRes] = await Promise.all([
+        fetch('/api/v1/workspaces').then((r) => r.json()),
+        this.fetchApi(`/libraries/${lib.id}/workspaces`),
+      ]);
+      allWorkspaces = Array.isArray(wsRes) ? wsRes : [];
+      boundWsIds = Array.isArray(bindingRes.workspaceIds) ? bindingRes.workspaceIds : [];
+    } catch (err) {
+      alert('加载工作区关联数据失败: ' + err.message);
+      return;
+    }
+
+    const html = `
+      <dialog id="kn-modal-workspace-bindings" class="kn-modal">
+        <div class="dialog-heading">
+          <div class="dialog-title-group">
+            <span class="dialog-badge">工作区关联</span>
+            <h2>绑定工作区 - ${escapeHtml(lib.name)}</h2>
+          </div>
+          <button class="icon-button btn-close-modal" type="button">✕</button>
+        </div>
+        <form id="kn-ws-binding-form" class="kn-form">
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+            勾选的工作区可共同访问、管理与提炼沉淀此知识库。支持跨工作区自主共享。
+          </p>
+          <div class="form-row">
+            <label>生效工作区列表 (可多选)</label>
+            <div id="kn-edit-workspaces-list" class="binding-libs-list" style="max-height: 220px; overflow-y: auto; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px;">
+              ${allWorkspaces.length === 0 ? `
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+                  <input type="checkbox" name="bind-ws-id" value="${escapeHtml(this.workspaceId)}" checked />
+                  当前工作区 (${escapeHtml(this.workspaceId)})
+                </label>
+              ` : allWorkspaces.map((w) => {
+                const isChecked = boundWsIds.includes(w.id) || (boundWsIds.length === 0 && w.id === lib.workspaceId);
+                const isCurrent = w.id === this.workspaceId;
+                const name = w.name || w.path || w.id;
+                return `
+                  <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; cursor: pointer;">
+                    <input type="checkbox" name="bind-ws-id" value="${escapeHtml(w.id)}" ${isChecked ? 'checked' : ''} />
+                    <span>${escapeHtml(name)} ${isCurrent ? '<strong style="color: var(--accent-color); font-size: 11px;">(当前)</strong>' : ''}</span>
+                    <span style="color: var(--text-muted); font-size: 11px; margin-left: auto;">${escapeHtml(w.path || '')}</span>
+                  </label>
+                `;
+              }).join('')}
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="ghost-btn btn-close-modal">取消</button>
+            <button type="submit" class="send-button">保存绑定</button>
+          </div>
+        </form>
+      </dialog>
+    `;
+
+    this.openModal(html, (dialog, closeModal) => {
+      dialog.querySelector('#kn-ws-binding-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const selectedWsIds = Array.from(dialog.querySelectorAll('input[name="bind-ws-id"]:checked')).map((el) => el.value);
+        if (selectedWsIds.length === 0) {
+          alert('项目专属库至少需要保留一个关联工作区');
+          return;
+        }
+
+        try {
+          await this.fetchApi(`/libraries/${lib.id}/workspaces`, {
+            method: 'PUT',
+            body: { workspaceIds: selectedWsIds },
+          });
+          closeModal();
+          await this.loadLibraries();
+          alert(`知识库「${lib.name}」工作区绑定已成功更新！生效工作区数: ${selectedWsIds.length}`);
+        } catch (err) {
+          alert('保存工作区绑定失败: ' + err.message);
         }
       });
     });

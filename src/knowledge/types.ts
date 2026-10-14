@@ -85,6 +85,7 @@ export interface Library {
   description: string;
   scope: Scope;
   workspaceId?: string;
+  workspaceIds?: string[];
   role: 'basic' | 'domain' | 'project' | 'legacy';
   createdAt?: number;
 }

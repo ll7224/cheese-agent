@@ -31,9 +31,67 @@ export function getAgentLibraryIds(
 }
 
 /**
+ * 将指定知识库绑定至一个或多个工作区（全量更新绑定）。
+ */
+export function bindLibraryWorkspaces(
+  db: Database.Database,
+  libraryId: string,
+  workspaceIds: string[]
+): void {
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM workspace_bindings WHERE library_id = ?`).run(libraryId);
+    const insert = db.prepare(`INSERT OR IGNORE INTO workspace_bindings (workspace_id, library_id) VALUES (?, ?)`);
+    const cleanIds: string[] = [];
+    for (const wsId of workspaceIds) {
+      if (wsId && wsId.trim()) {
+        const trimmed = wsId.trim();
+        cleanIds.push(trimmed);
+        insert.run(trimmed, libraryId);
+      }
+    }
+    const primary = cleanIds[0] || null;
+    db.prepare(`UPDATE libraries SET workspace_id = ? WHERE id = ?`).run(primary, libraryId);
+  });
+  tx();
+}
+
+/**
+ * 获取指定知识库绑定的所有工作区 ID 列表。
+ */
+export function getLibraryWorkspaceIds(
+  db: Database.Database,
+  libraryId: string
+): string[] {
+  const rows = db.prepare(`SELECT workspace_id FROM workspace_bindings WHERE library_id = ?`).all(libraryId) as Array<{ workspace_id: string }>;
+  return rows.map((r) => r.workspace_id);
+}
+
+/**
+ * 获取指定工作区绑定的所有知识库 ID 列表。
+ */
+export function getWorkspaceLibraryIds(
+  db: Database.Database,
+  workspaceId: string
+): string[] {
+  const rows = db.prepare(`SELECT library_id FROM workspace_bindings WHERE workspace_id = ?`).all(workspaceId) as Array<{ library_id: string }>;
+  return rows.map((r) => r.library_id);
+}
+
+/**
+ * 添加单个工作区与知识库的绑定关联。
+ */
+export function addWorkspaceBinding(
+  db: Database.Database,
+  workspaceId: string,
+  libraryId: string
+): void {
+  db.prepare(`INSERT OR IGNORE INTO workspace_bindings (workspace_id, library_id) VALUES (?, ?)`).run(workspaceId, libraryId);
+}
+
+/**
  * 根据调用上下文计算当前可访问的知识库 ID 清单。
  * 组合规则：
- * 1. 当前项目库（project scope 且对应当前 workspaceId）；
+ * 1. 当前项目库 / 工作区绑定库（project scope 且对应当前 workspaceId 或在工作区绑定表中）；
  * 2. 公共基础库（public scope 且 role 为 basic）；
  * 3. 当前 Agent 显式绑定的库；
  * 4. 通用 Agent（general）按 query 分词匹配最多 3 个公共领域库（public domain）。
@@ -44,13 +102,17 @@ export function resolveLibraries(
   ctx: KnowledgeContext,
   boundLibraryIds: string[] = [],
   query?: string,
-  requestedIds?: string[]
+  requestedIds?: string[],
+  boundWorkspaceLibraryIds: string[] = []
 ): string[] {
   const accessibleSet = new Set<string>();
 
   for (const lib of allLibraries) {
-    // 1. 项目专属库
-    if (lib.scope === 'project' && lib.workspaceId === ctx.workspaceId) {
+    // 1. 项目专属库 / 工作区绑定库
+    if (
+      lib.scope === 'project' &&
+      (lib.workspaceId === ctx.workspaceId || boundWorkspaceLibraryIds.includes(lib.id))
+    ) {
       accessibleSet.add(lib.id);
     }
     // 2. 公共基础库

@@ -6,7 +6,7 @@ import type {
   GraphEdge,
   KnowledgeStatus,
 } from './types.js';
-import { resolveLibraries, getAgentLibraryIds } from './libraries.js';
+import { resolveLibraries, getAgentLibraryIds, getWorkspaceLibraryIds } from './libraries.js';
 
 /**
  * 执行范围受限的代码结构与局部实体图谱查询。
@@ -20,7 +20,15 @@ export function queryGraph(
 ): GraphView {
   const allLibraries = store.listLibraries();
   const boundLibIds = getAgentLibraryIds(store.db, ctx.agentId);
-  const allowedLibraryIds = resolveLibraries(allLibraries, ctx, boundLibIds);
+  const boundWorkspaceLibIds = getWorkspaceLibraryIds(store.db, ctx.workspaceId);
+  const allowedLibraryIds = resolveLibraries(
+    allLibraries,
+    ctx,
+    boundLibIds,
+    undefined,
+    undefined,
+    boundWorkspaceLibIds
+  );
 
   const generation = store.getGeneration();
 

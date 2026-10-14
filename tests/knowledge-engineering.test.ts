@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { createKnowledgeTestEnv } from './helpers/knowledge-fixture.js';
 import { KnowledgeService } from '../src/knowledge/service.js';
 import { chunkWithSpans } from '../src/knowledge/chunks.js';
+import { bindLibraryWorkspaces, getLibraryWorkspaceIds } from '../src/knowledge/libraries.js';
 import type { KnowledgeContext, SearchRequest } from '../src/knowledge/types.js';
 import type { CaptureInput } from '../src/knowledge/capture.js';
 
@@ -576,5 +578,149 @@ test('P3-Scenario 11: 公共领域知识库文档管理、提炼与沉淀权限�
   // 6. 验证：listItems 在管理端能查出该公共领域库的条目
   const items = service.listItems(ctx);
   assert.ok(items.some((i) => i.id === committed[0].id), '管理端应能列出公共领域库中的沉淀条目');
+});
+
+test('P3-Scenario 12: 知识库多工作区自主绑定与跨工作区隔离权限测试 (Multi-Workspace Binding & Cross-Workspace Isolation)', async (t) => {
+  const env = createKnowledgeTestEnv(t);
+  const store = env.store;
+  const service = new KnowledgeService({ dataDir: env.tempDir, store });
+
+  const ctxA: KnowledgeContext = {
+    workspaceId: 'ws-alpha',
+    workspacePath: path.join(env.tempDir, 'alpha'),
+    agentId: 'general',
+    role: 'owner',
+  };
+  const ctxB: KnowledgeContext = {
+    workspaceId: 'ws-beta',
+    workspacePath: path.join(env.tempDir, 'beta'),
+    agentId: 'general',
+    role: 'owner',
+  };
+  const ctxC: KnowledgeContext = {
+    workspaceId: 'ws-gamma',
+    workspacePath: path.join(env.tempDir, 'gamma'),
+    agentId: 'general',
+    role: 'owner',
+  };
+
+  service.attachWorkspace(ctxA);
+  service.attachWorkspace(ctxB);
+  service.attachWorkspace(ctxC);
+
+  // 1. 创建一个多工作区绑定的项目库 (同时绑定 ws-alpha 和 ws-beta)
+  const sharedLib = store.createLibrary({
+    id: 'project:shared-lib:001',
+    name: '跨端微服务研发知识库',
+    description: '供 Alpha 和 Beta 共享的项目专属库',
+    scope: 'project',
+    workspaceId: 'ws-alpha',
+    workspaceIds: ['ws-alpha', 'ws-beta'],
+    role: 'project',
+  });
+
+  // 验证绑定持久化
+  const boundWs = getLibraryWorkspaceIds(store.db, sharedLib.id);
+  assert.ok(boundWs.includes('ws-alpha'));
+  assert.ok(boundWs.includes('ws-beta'));
+  assert.ok(!boundWs.includes('ws-gamma'));
+
+  // 2. 在该库中写入一篇架构文档
+  const docMarkdown = `# 跨工作区服务规范
+## 架构规范与约束 (Rules)
+- **MW-201**: 微服务网关全局超时时间必须统一设定为 3000ms
+- **MW-202**: 消息队列消费幂等 Key 必须统一使用 requestId 与 bizCode 的哈希
+`;
+  const source = store.createSource({
+    id: 'src-shared-spec',
+    libraryId: sharedLib.id,
+    kind: 'managed',
+    locator: 'docs/mw-specs.md',
+    enabled: true,
+  });
+
+  const rawChunks = chunkWithSpans(docMarkdown);
+  const hash = crypto.createHash('sha256').update(docMarkdown).digest('hex');
+  const pubRes = store.publishRevision({
+    sourceId: source.id,
+    sourceKey: 'docs/mw-specs.md',
+    content: docMarkdown,
+    hash,
+    expectedPreviousRevisionId: null,
+    chunks: rawChunks.map((c) => ({
+      text: c.text,
+      span: c.span,
+      evidenceKind: 'document',
+    })),
+  });
+  const docId = pubRes.documentId;
+
+  // 3. 验证管理权限隔离 (getManageableLibraryIds)
+  const manageableA = service.getManageableLibraryIds(ctxA);
+  const manageableB = service.getManageableLibraryIds(ctxB);
+  const manageableC = service.getManageableLibraryIds(ctxC);
+
+  assert.ok(manageableA.includes(sharedLib.id), 'ws-alpha 拥有 sharedLib 管理权限');
+  assert.ok(manageableB.includes(sharedLib.id), 'ws-beta 拥有 sharedLib 管理权限');
+  assert.ok(!manageableC.includes(sharedLib.id), 'ws-gamma 未绑定，绝不能拥有 sharedLib 管理权限');
+
+  // 4. 验证提炼操作权限隔离
+  // ws-beta 应该能提取
+  const draftsB = await service.previewExtractDocument(ctxB, docId);
+  assert.ok(draftsB.length >= 2, 'ws-beta 可以成功提炼该共享库文档');
+
+  // ws-gamma 提炼必须抛出 Access denied 异常
+  await assert.rejects(
+    async () => {
+      await service.previewExtractDocument(ctxC, docId);
+    },
+    /Access denied to document/,
+    '未绑定的 ws-gamma 提炼文档必须被拒绝'
+  );
+
+  // 5. 验证执行检索 (search) 隔离
+  const searchA = await service.search(ctxA, {
+    query: '超时时间必须统一设定为 3000ms',
+    mode: 'fact',
+    topK: 5,
+  });
+  assert.ok(searchA.hits.some((h) => h.text.includes('3000ms')), 'ws-alpha 能够检索到共享库知识');
+
+  const searchB = await service.search(ctxB, {
+    query: '超时时间必须统一设定为 3000ms',
+    mode: 'fact',
+    topK: 5,
+  });
+  assert.ok(searchB.hits.some((h) => h.text.includes('3000ms')), 'ws-beta 能够检索到共享库知识');
+
+  const searchC = await service.search(ctxC, {
+    query: '超时时间必须统一设定为 3000ms',
+    mode: 'fact',
+    topK: 5,
+  });
+  assert.ok(!searchC.hits.some((h) => h.text.includes('3000ms')), 'ws-gamma 未绑定，不可检索到共享库知识');
+
+  // 6. 动态调整绑定：将 sharedLib 改为绑定至 ws-beta 和 ws-gamma (移除 ws-alpha)
+  bindLibraryWorkspaces(store.db, sharedLib.id, ['ws-beta', 'ws-gamma']);
+
+  // 验证动态调整后各工作区的权限实时变更
+  const updatedManageableA = service.getManageableLibraryIds(ctxA);
+  const updatedManageableC = service.getManageableLibraryIds(ctxC);
+
+  assert.ok(!updatedManageableA.includes(sharedLib.id), '解除绑定后，ws-alpha 立即失去管理权限');
+  assert.ok(updatedManageableC.includes(sharedLib.id), '加入绑定后，ws-gamma 立即获得管理权限');
+
+  // 验证 ws-gamma 现在可以成功提炼
+  const draftsC = await service.previewExtractDocument(ctxC, docId);
+  assert.ok(draftsC.length >= 2, 'ws-gamma 获得绑定后可以正常提炼');
+
+  // 验证 ws-alpha 现在被拒绝
+  await assert.rejects(
+    async () => {
+      await service.previewExtractDocument(ctxA, docId);
+    },
+    /Access denied to document/,
+    '被解绑的 ws-alpha 提炼文档应被拒绝'
+  );
 });
 

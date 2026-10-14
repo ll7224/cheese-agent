@@ -9,7 +9,7 @@ import type {
   KnowledgeStatus,
   QueryMode,
 } from './types.js';
-import { resolveLibraries, resolveIndexKeys, getAgentLibraryIds } from './libraries.js';
+import { resolveLibraries, resolveIndexKeys, getAgentLibraryIds, getWorkspaceLibraryIds } from './libraries.js';
 import { chunkWithSpans } from './chunks.js';
 import { indexCode } from './code-indexer.js';
 import crypto from 'node:crypto';
@@ -426,6 +426,7 @@ export async function executeSearch(
 ): Promise<SearchResponse> {
   const allLibraries = store.listLibraries();
   const boundLibIds = getAgentLibraryIds(store.db, ctx.agentId);
+  const boundWorkspaceLibIds = getWorkspaceLibraryIds(store.db, ctx.workspaceId);
 
   // 解析当前上下文真正可访问的知识库清单
   const allowedLibraryIds = resolveLibraries(
@@ -433,7 +434,8 @@ export async function executeSearch(
     ctx,
     boundLibIds,
     request.query,
-    request.libraryIds
+    request.libraryIds,
+    boundWorkspaceLibIds
   );
 
   if (allowedLibraryIds.length === 0) {
@@ -493,7 +495,15 @@ export function getCitationView(
 ): CitationView {
   const allLibraries = store.listLibraries();
   const boundLibIds = getAgentLibraryIds(store.db, ctx.agentId);
-  const allowedLibraryIds = resolveLibraries(allLibraries, ctx, boundLibIds);
+  const boundWorkspaceLibIds = getWorkspaceLibraryIds(store.db, ctx.workspaceId);
+  const allowedLibraryIds = resolveLibraries(
+    allLibraries,
+    ctx,
+    boundLibIds,
+    undefined,
+    undefined,
+    boundWorkspaceLibIds
+  );
 
   const row = store.db.prepare(`
     SELECT

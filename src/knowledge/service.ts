@@ -5,7 +5,13 @@ import Database from 'better-sqlite3';
 import { KnowledgeStore } from './store.js';
 import { LocalSyncManager, type EmbeddingFn } from './local-sync.js';
 import { discoverWorkspaceSources } from './sources.js';
-import { resolveLibraries } from './libraries.js';
+import {
+  resolveLibraries,
+  addWorkspaceBinding,
+  getWorkspaceLibraryIds,
+  getLibraryWorkspaceIds,
+  bindLibraryWorkspaces,
+} from './libraries.js';
 import {
   executeSearch,
   getCitationView,
@@ -97,6 +103,8 @@ export class KnowledgeService {
         role: 'project',
       });
     }
+
+    addWorkspaceBinding(this.store.db, ctx.workspaceId, projectLibId);
 
     if (!this.store.getLibrary('public-basic')) {
       this.store.createLibrary({
@@ -383,12 +391,17 @@ export class KnowledgeService {
   }
 
   /**
-   * 获取当前工作区上下文允许管理/操作的知识库 ID 列表（包含本工作区项目库与所有全局公共库）
+   * 获取当前工作区上下文允许管理/操作的知识库 ID 列表（包含本工作区项目库、绑定的项目库与所有全局公共库）
    */
   getManageableLibraryIds(ctx: KnowledgeContext): string[] {
     const allLibs = this.store.listLibraries();
+    const boundWsLibIds = getWorkspaceLibraryIds(this.store.db, ctx.workspaceId);
     return allLibs
-      .filter((l) => (l.scope === 'project' && l.workspaceId === ctx.workspaceId) || l.scope === 'public')
+      .filter(
+        (l) =>
+          l.scope === 'public' ||
+          (l.scope === 'project' && (l.workspaceId === ctx.workspaceId || boundWsLibIds.includes(l.id)))
+      )
       .map((l) => l.id);
   }
 

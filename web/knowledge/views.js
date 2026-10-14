@@ -30,6 +30,7 @@ export function buildKnowledgeShell() {
           <label for="kn-lib-select" class="lib-label">当前知识库:</label>
           <select id="kn-lib-select" class="kn-select"></select>
         </div>
+        <button id="kn-manage-workspaces-btn" class="mini-text-btn" type="button" title="管理此知识库绑定的工作区" style="margin-right: 6px;">🔗 绑定工作区</button>
         <button id="kn-create-lib-btn" class="action-tag-btn" type="button">＋ 新建知识库</button>
       </div>
     </div>

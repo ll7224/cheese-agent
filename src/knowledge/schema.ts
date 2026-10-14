@@ -71,6 +71,18 @@ export function initKnowledgeSchema(db: Database.Database): void {
       PRIMARY KEY(agent_id, library_id)
     );
 
+    CREATE TABLE IF NOT EXISTS workspace_bindings (
+      workspace_id TEXT NOT NULL,
+      library_id TEXT NOT NULL,
+      PRIMARY KEY(workspace_id, library_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_bindings_lib ON workspace_bindings(library_id);
+    CREATE INDEX IF NOT EXISTS idx_workspace_bindings_ws ON workspace_bindings(workspace_id);
+
+    INSERT OR IGNORE INTO workspace_bindings (workspace_id, library_id)
+    SELECT workspace_id, id FROM libraries
+    WHERE workspace_id IS NOT NULL AND workspace_id != '';
+
     CREATE TABLE IF NOT EXISTS generation (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       version INTEGER NOT NULL DEFAULT 1
