@@ -202,15 +202,24 @@ export class KnowledgeController {
     const wsId = this.workspaceId;
     if (!wsId) throw new Error('未选择工作区');
 
+    const method = (options.method || 'GET').toUpperCase();
     const headers = { ...options.headers };
-    if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
+    let body = options.body;
+
+    if (['POST', 'PUT', 'PATCH'].includes(method)) {
       headers['Content-Type'] = 'application/json';
-      options.body = JSON.stringify(options.body);
+      if (body === undefined || body === null) {
+        body = '{}';
+      } else if (typeof body === 'object' && !(body instanceof FormData)) {
+        body = JSON.stringify(body);
+      }
     }
 
     const res = await fetch(`/api/v1/workspaces/${wsId}/knowledge${path}`, {
       ...options,
+      method,
       headers,
+      body,
     });
 
     if (!res.ok) {
@@ -1128,6 +1137,7 @@ export class KnowledgeController {
       try {
         const drafts = await this.fetchApi(`/documents/${doc.id}/extract/preview`, {
           method: 'POST',
+          body: {},
         });
 
         if (!drafts || drafts.length === 0) {
