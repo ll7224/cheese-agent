@@ -250,4 +250,15 @@ Content-Type: application/json
    - Web 服务端运行时：位于工作区配置路径或各工作区独立 `.cheese-knowledge/knowledge.db`；
    - CLI 运行时：惰性按需连接，与 Web 隔离，互不干扰全局句柄。
 
+13. 从文档提炼与沉淀初始化知识 (Bootstrap Knowledge from Docs)
+   - **冷启动知识沉淀治理**：针对新接入工程缺乏历史会话的问题，直接从 `docs/`、`README.md` 及 ADR 文档中提炼结构化知识条目（`decision`、`observation`、`experience`），并与底层切片和 AST 代码实体打通。
+   - **双轨提取引擎**：
+     - *确定性零 LLM 引擎* (`extractDeterministicFromDoc`)：解析 ADR 标题结构（`## 决策`、`## 约束/规范`、`## 最佳实践`）与硬性断言语句（`必须`、`统一使用`、`严禁`、`选用`、`强制` 等），实现毫秒级纯本地离线提炼。
+     - *大模型辅助引擎* (`extractWithModelFromDoc`)：配置了工作区模型时通过严苛 JSON Schema 提炼原子技术结论与对应关键原句。
+   - **防御性 Default-Candidate 策略**：提炼的条目默认标记为 `candidate`（待验证），仅在 `experience` 检索模式下召回，严格阻断年久失修的技术文档对 `fact` 事实检索模式的污染；用户在界面或人工复核后可一键升级为 `effective`。
+   - **精确证据切片追溯**：每个提炼条目完整保留对应的 `evidenceChunkId` 与起止行号，支持在检索与溯源中追溯到文档真实位置。
+   - **AST 代码实体图谱关联**：自动扫描条目文本中提及的现有源码 AST 符号（如 `handleLogin`），在 `edges` 表中自动建立指向实体的 `explains` 或 `constrains` 语义边。
+   - **交互审查入库流**：在前端文档列表提供单文档 `[提炼]` 与工具栏 `[💡 从文档批量提炼知识]` 入口，弹窗支持逐条勾选、结论文案在线修改、类型/状态切换与批量确认入库。
+
+
 

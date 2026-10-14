@@ -176,9 +176,11 @@ export interface GraphView {
   truncated: boolean;
 }
 
+export type KnowledgeItemKind = 'decision' | 'observation' | 'experience';
+
 export interface KnowledgeItem {
   id: string;
-  kind: 'decision' | 'observation' | 'experience';
+  kind: KnowledgeItemKind;
   status: KnowledgeStatus;
   text: string;
   libraryId: string;

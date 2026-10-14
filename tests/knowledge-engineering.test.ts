@@ -372,3 +372,130 @@ test('P2-Task 7: 沉淀条目纠错、状态过滤与 fact/experience 模式隔�
   assert.ok(invalidatedOnly.every((i) => i.status === 'invalidated'));
   assert.ok(invalidatedOnly.some((i) => i.id === effItem.id));
 });
+
+test('P3-Scenario 10: 从工程技术文档提炼沉淀知识 (Bootstrap from Docs)', async (t) => {
+  const env = createKnowledgeTestEnv(t);
+  const store = env.store;
+  const service = new KnowledgeService({ dataDir: env.tempDir, store });
+
+  const ctx: KnowledgeContext = {
+    workspaceId: 'ws-bootstrap',
+    workspacePath: env.tempDir,
+    agentId: 'general',
+    role: 'owner',
+  };
+  service.attachWorkspace(ctx);
+
+  const libId = `project:ws-bootstrap`;
+
+  // 1. 先建立一个代码文件，解析产生 AST 实体 (如 handleLogin)
+  const codeContent = `
+export function handleLogin(username: string): boolean {
+  return username.length > 0;
+}
+`;
+  await service.dispatch(ctx, {
+    op: 'ingest',
+    input: { content: codeContent, name: 'src/auth.ts', libraryId: libId },
+  });
+
+  const ent = store.listEntities({ workspaceId: 'ws-bootstrap' }).find((e) => e.name === 'handleLogin');
+  assert.ok(ent, '代码实体 handleLogin 必须被索引');
+
+  // 2. 创建一个包含架构决策 ADR 与规范的 Markdown 工程文档
+  const docMarkdown = `# 认证系统架构规范与 ADR
+
+## 架构决策 (Decision)
+- **ADR-001**: 系统中所有的用户认证调用必须由 handleLogin 统一接入并签发 JWT
+- 生产环境统一使用 PostgreSQL 作为持久化存储
+
+## 规范与约束 (Constraints)
+- 单次认证请求超时时限必须在 2000ms 以内
+- 严禁在客户端直接保存明文密钥
+
+## 实践经验与最佳实践 (Practices)
+- 建议优先使用连接池复用数据库会话
+`;
+
+  const ingestRes = await service.dispatch(ctx, {
+    op: 'ingest',
+    input: { content: docMarkdown, name: 'docs/auth-adr.md', libraryId: libId },
+  });
+  const docId = ingestRes.documentId;
+  assert.ok(docId, '文档导入成功');
+
+  // 3. 执行单文档提炼预览 previewExtractDocument
+  const drafts = await service.previewExtractDocument(ctx, docId);
+  assert.ok(drafts.length >= 3, `应该提取出至少 3 条知识草稿，实际提取到 ${drafts.length}`);
+
+  // 验证提取出来的草稿属性
+  const loginDraft = drafts.find((d) => d.text.includes('handleLogin'));
+  assert.ok(loginDraft, '必须提炼出包含 handleLogin 的条目');
+  assert.equal(loginDraft.kind, 'decision');
+  assert.equal(loginDraft.status, 'candidate', '文档提取的知识默认设为待验证 candidate 状态');
+  assert.ok(loginDraft.evidenceChunkId, '必须保留底层切片 ID');
+  assert.ok(loginDraft.startLine > 0, '必须包含行号');
+  assert.ok(loginDraft.matchedEntityIds?.includes(ent.id), '必须自动关联 handleLogin 实体');
+  assert.ok(loginDraft.matchedEntityNames?.includes('handleLogin'));
+
+  // 4. 执行全量文档提炼预览 previewExtractAllDocs
+  const allDocDrafts = await service.previewExtractAllDocs(ctx, libId);
+  assert.ok(allDocDrafts.length >= 1);
+  const foundInBatch = allDocDrafts.find((d) => d.documentId === docId);
+  assert.ok(foundInBatch && foundInBatch.items.length >= 3);
+
+  // 5. 提交入库 commitExtractedDocItems
+  // 选择将 loginDraft 提升为 effective，将另一条作为 candidate
+  const draftToCommit1 = { ...loginDraft, status: 'effective' as const };
+  const practiceDraft = drafts.find((d) => d.kind === 'experience') || drafts[1];
+  const draftToCommit2 = { ...practiceDraft, status: 'candidate' as const };
+
+  const initialGen = store.getGeneration();
+  const committedItems = service.commitExtractedDocItems(ctx, docId, [draftToCommit1, draftToCommit2]);
+  assert.equal(committedItems.length, 2);
+  assert.ok(store.getGeneration() > initialGen, '入库后 generation 版本号必须递增');
+
+  // 验证图谱关联边：loginDraft 关联了 handleLogin，检查 edges 表
+  const edges = store.db.prepare('SELECT * FROM edges WHERE source_id = ?').all(committedItems[0].id) as any[];
+  assert.ok(edges.length >= 1, '提炼知识必须自动生成指向关联代码实体的图谱边');
+  assert.equal(edges[0].target_id, ent.id);
+  assert.ok(['explains', 'constrains'].includes(edges[0].kind));
+
+  // 6. 验证防御策略与检索表现
+  // (a) fact 模式：仅召回 status=effective 的条目，绝对不召回 status=candidate 的条目
+  const factSearch = await service.search(ctx, {
+    query: 'handleLogin',
+    mode: 'fact',
+    topK: 5,
+    libraryIds: [libId],
+  });
+  assert.ok(
+    factSearch.hits.some((h) => h.citation.documentId === committedItems[0].id),
+    'fact 模式必须能检索到提升为 effective 的提炼条目'
+  );
+
+  const factSearchCand = await service.search(ctx, {
+    query: draftToCommit2.text.slice(0, 8),
+    mode: 'fact',
+    topK: 5,
+    libraryIds: [libId],
+  });
+  assert.equal(
+    factSearchCand.hits.filter((h) => h.citation.documentId === committedItems[1].id).length,
+    0,
+    'fact 模式绝不能召回仍为 candidate 状态的知识条目'
+  );
+
+  // (b) experience 模式：同时召回 candidate 状态与 effective 状态的条目
+  const expSearch = await service.search(ctx, {
+    query: draftToCommit2.text.slice(0, 8),
+    mode: 'experience',
+    topK: 5,
+    libraryIds: [libId],
+  });
+  assert.ok(
+    expSearch.hits.some((h) => h.citation.documentId === committedItems[1].id),
+    'experience 模式必须能召回 candidate 知识条目'
+  );
+});
+

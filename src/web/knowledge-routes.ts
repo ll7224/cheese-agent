@@ -604,5 +604,51 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     }
   });
 
+  // 21. POST /api/v1/workspaces/:id/knowledge/documents/:documentId/extract/preview
+  routes.post('/api/v1/workspaces/:id/knowledge/documents/:documentId/extract/preview', async (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const documentId = context.req.param('documentId');
+    try {
+      const drafts = await runtime.knowledgeService.previewExtractDocument(ctx, documentId);
+      return context.json(drafts);
+    } catch (err: any) {
+      if (err.message?.includes('not found') || err.message?.includes('denied')) {
+        throw new RuntimeError(err.message, 404);
+      }
+      throw new RuntimeError(err.message || '提取预览失败', 400);
+    }
+  });
+
+  // 22. POST /api/v1/workspaces/:id/knowledge/documents/:documentId/extract/commit
+  routes.post('/api/v1/workspaces/:id/knowledge/documents/:documentId/extract/commit', async (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const documentId = context.req.param('documentId');
+    const body = await context.req.json();
+    if (!Array.isArray(body.items)) {
+      return context.json({ error: 'items 必须为数组' }, 400);
+    }
+    try {
+      const items = runtime.knowledgeService.commitExtractedDocItems(ctx, documentId, body.items);
+      return context.json(items, 201);
+    } catch (err: any) {
+      if (err.message?.includes('not found') || err.message?.includes('denied')) {
+        throw new RuntimeError(err.message, 404);
+      }
+      throw new RuntimeError(err.message || '保存提炼条目失败', 400);
+    }
+  });
+
+  // 23. POST /api/v1/workspaces/:id/knowledge/extract-docs/preview
+  routes.post('/api/v1/workspaces/:id/knowledge/extract-docs/preview', async (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const body = (await context.req.json().catch(() => ({}))) as any;
+    try {
+      const results = await runtime.knowledgeService.previewExtractAllDocs(ctx, body.libraryId);
+      return context.json(results);
+    } catch (err: any) {
+      throw new RuntimeError(err.message || '批量提取预览失败', 400);
+    }
+  });
+
   return routes;
 }

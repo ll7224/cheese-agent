@@ -20,6 +20,13 @@ import {
   getProviderStatus,
 } from './providers.js';
 import { chunkWithSpans } from './chunks.js';
+import {
+  type ExtractedDocItemDraft,
+  type ChunkInfo,
+  type EntityInfo,
+  extractDeterministicFromDoc,
+  extractWithModelFromDoc,
+} from './doc-extractor.js';
 import type {
   KnowledgeContext,
   SourceProposal,
@@ -471,6 +478,190 @@ export class KnowledgeService {
     tx();
 
     return newItem;
+  }
+
+  /**
+   * 预览从指定文档中提炼的核心知识条目（不写入数据库）
+   */
+  async previewExtractDocument(
+    ctx: KnowledgeContext,
+    documentId: string
+  ): Promise<ExtractedDocItemDraft[]> {
+    const doc = this.store.getDocumentById(documentId);
+    if (!doc) {
+      throw new Error(`Document not found: ${documentId}`);
+    }
+    const source = this.store.getSource(doc.sourceId);
+    if (!source) {
+      throw new Error(`Source not found: ${doc.sourceId}`);
+    }
+    const allLibs = this.store.listLibraries();
+    const accessibleIds = resolveLibraries(allLibs, ctx);
+    if (!accessibleIds.includes(source.libraryId)) {
+      throw new Error(`Access denied to document: ${documentId}`);
+    }
+    if (!doc.activeRevisionId) {
+      throw new Error(`Document has no active revision: ${documentId}`);
+    }
+
+    const rev = this.store.readRevision(doc.activeRevisionId);
+    if (!rev) {
+      throw new Error(`Revision content not found: ${doc.activeRevisionId}`);
+    }
+
+    const chunkRows = this.store.db.prepare(`
+      SELECT c.id, c.text, cr.start_line as startLine, cr.end_line as endLine
+      FROM chunk_refs cr
+      JOIN chunks c ON c.id = cr.chunk_id
+      WHERE cr.revision_id = ?
+      ORDER BY cr.start_line ASC
+    `).all(doc.activeRevisionId) as ChunkInfo[];
+
+    const entityRows = this.store.db.prepare(`
+      SELECT id, name FROM entities WHERE library_id = ?
+    `).all(source.libraryId) as EntityInfo[];
+
+    const model = this.options.modelForWorkspace
+      ? this.options.modelForWorkspace(ctx.workspaceId)
+      : undefined;
+
+    if (model) {
+      return extractWithModelFromDoc(
+        { id: doc.id, sourceKey: doc.sourceKey },
+        rev.content,
+        chunkRows,
+        entityRows,
+        model
+      );
+    }
+
+    return extractDeterministicFromDoc(
+      { id: doc.id, sourceKey: doc.sourceKey },
+      rev.content,
+      chunkRows,
+      entityRows
+    );
+  }
+
+  /**
+   * 批量预览工作区文档中提炼的核心知识草稿
+   */
+  async previewExtractAllDocs(
+    ctx: KnowledgeContext,
+    libraryId?: string
+  ): Promise<Array<{ documentId: string; sourceKey: string; items: ExtractedDocItemDraft[] }>> {
+    const targetLibId = libraryId || `project:${ctx.workspaceId}`;
+    const allLibs = this.store.listLibraries();
+    const accessibleIds = resolveLibraries(allLibs, ctx);
+    if (!accessibleIds.includes(targetLibId)) {
+      throw new Error(`Access denied to library: ${targetLibId}`);
+    }
+
+    const docs = this.store.listDocumentsPaged({
+      libraryId: targetLibId,
+      limit: 100,
+    });
+
+    const results: Array<{ documentId: string; sourceKey: string; items: ExtractedDocItemDraft[] }> = [];
+    for (const doc of docs) {
+      if (!doc.activeRevisionId) continue;
+      const lowerKey = doc.sourceKey.toLowerCase();
+      if (!lowerKey.endsWith('.md') && !lowerKey.includes('doc')) continue;
+
+      try {
+        const items = await this.previewExtractDocument(ctx, doc.id);
+        if (items.length > 0) {
+          results.push({
+            documentId: doc.id,
+            sourceKey: doc.sourceKey,
+            items,
+          });
+        }
+      } catch {
+        // 跳过非正常或不可提取文档
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * 确认并将用户选中的文档知识条目正式沉淀入库
+   */
+  commitExtractedDocItems(
+    ctx: KnowledgeContext,
+    documentId: string,
+    items: ExtractedDocItemDraft[]
+  ): KnowledgeItem[] {
+    const doc = this.store.getDocumentById(documentId);
+    if (!doc) {
+      throw new Error(`Document not found: ${documentId}`);
+    }
+    const source = this.store.getSource(doc.sourceId);
+    if (!source) {
+      throw new Error(`Source not found: ${doc.sourceId}`);
+    }
+    const allLibs = this.store.listLibraries();
+    const accessibleIds = resolveLibraries(allLibs, ctx);
+    if (!accessibleIds.includes(source.libraryId)) {
+      throw new Error(`Access denied to document: ${documentId}`);
+    }
+
+    const createdItems: KnowledgeItem[] = [];
+    const now = Date.now();
+
+    const tx = this.store.db.transaction(() => {
+      for (const draft of items) {
+        if (!draft.text || draft.text.trim().length === 0) continue;
+
+        const itemId = `item-doc-${randomUUID()}`;
+        const item: KnowledgeItem = {
+          id: itemId,
+          kind: draft.kind || 'experience',
+          status: draft.status || 'candidate',
+          text: draft.text.trim(),
+          libraryId: source.libraryId,
+          evidenceIds: draft.evidenceChunkId ? [draft.evidenceChunkId] : [],
+          applicability: 'project',
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        this.store.createKnowledgeItem(item);
+        createdItems.push(item);
+
+        // 写入向量/全文索引
+        this.store.vectorStore.upsertIndexedChunks([
+          {
+            id: `item-chunk-${item.id}`,
+            text: item.text,
+            source: `knowledge-item:${item.id}`,
+            chunkIndex: 0,
+            collectionId: `${source.libraryId}:${item.status}`,
+          },
+        ]);
+
+        // 若匹配到代码实体，建立 explains 或 constrains 边
+        if (Array.isArray(draft.matchedEntityIds)) {
+          for (const entId of draft.matchedEntityIds) {
+            const edgeKind = draft.kind === 'observation' ? 'constrains' : 'explains';
+            const edgeId = `edge-doc-${item.id}-${entId}`;
+            this.store.db.prepare(`
+              INSERT OR REPLACE INTO edges (id, source_id, target_id, kind, status, library_id)
+              VALUES (?, ?, ?, ?, ?, ?)
+            `).run(edgeId, item.id, entId, edgeKind, item.status, source.libraryId);
+          }
+        }
+      }
+
+      // 递增快照 generation
+      this.store.db.prepare(`
+        UPDATE generation SET version = version + 1 WHERE id = 1
+      `).run();
+    });
+
+    tx();
+    return createdItems;
   }
 
   /**

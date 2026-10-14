@@ -75,6 +75,7 @@ export function buildKnowledgeShell() {
             <span class="toolbar-stat" id="kn-docs-count">共 0 篇文档</span>
           </div>
           <div class="toolbar-right">
+            <button id="kn-extract-all-docs-btn" class="mini-text-btn" type="button" style="margin-right: 8px;">💡 从文档批量提炼知识</button>
             <button id="kn-import-doc-btn" class="action-tag-btn" type="button">＋ 导入文档</button>
           </div>
         </div>
