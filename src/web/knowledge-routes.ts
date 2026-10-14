@@ -34,9 +34,6 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
       role: 'owner',
     };
 
-    // 确保工作区基础库已就绪
-    runtime.knowledgeService.attachWorkspace(ctx);
-
     return { ctx, workspace: ws };
   }
 
@@ -94,7 +91,24 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     return context.json(returnedLib || created, 201);
   });
 
-  // 1.1 GET/PUT /api/v1/workspaces/:id/knowledge/libraries/:libraryId/workspaces
+  // 1.1 DELETE /api/v1/workspaces/:id/knowledge/libraries/:libraryId
+  routes.delete('/api/v1/workspaces/:id/knowledge/libraries/:libraryId', (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const libraryId = context.req.param('libraryId');
+    const lib = runtime.knowledgeService.store.getLibrary(libraryId);
+    if (!lib) {
+      throw new RuntimeError('知识库不存在', 404);
+    }
+    const manageableIds = getManageableLibraryIds(ctx);
+    if (!manageableIds.includes(libraryId)) {
+      throw new RuntimeError('无权删除此知识库', 403);
+    }
+
+    const success = runtime.knowledgeService.store.deleteLibrary(libraryId);
+    return context.json({ success, libraryId });
+  });
+
+  // 1.2 GET/PUT /api/v1/workspaces/:id/knowledge/libraries/:libraryId/workspaces
   routes.get('/api/v1/workspaces/:id/knowledge/libraries/:libraryId/workspaces', (context) => {
     const { ctx } = getContext(context.req.param('id'));
     const libraryId = context.req.param('libraryId');

@@ -222,14 +222,56 @@ export class SqliteVectorStore {
    */
   removeChunks(ids: string[]): void {
     if (ids.length === 0) return;
-    const deleteChunk = this.db.prepare(`DELETE FROM chunks WHERE id = ?`);
-    const deleteVec = this.db.prepare(`DELETE FROM chunks_vec WHERE id = ?`);
-    const deleteFts = this.db.prepare(`DELETE FROM chunks_fts WHERE id = ?`);
-    for (const id of ids) {
-      deleteChunk.run(id);
-      deleteVec.run(id);
-      deleteFts.run(id);
+    if (ids.length <= 100) {
+      const deleteChunk = this.db.prepare(`DELETE FROM chunks WHERE id = ?`);
+      const deleteVec = this.db.prepare(`DELETE FROM chunks_vec WHERE id = ?`);
+      const deleteFts = this.db.prepare(`DELETE FROM chunks_fts WHERE id = ?`);
+      for (const id of ids) {
+        deleteChunk.run(id);
+        deleteVec.run(id);
+        deleteFts.run(id);
+      }
+      return;
     }
+
+    // 大批量删除时，通过临时表批量关联删除，避免 FTS5 / vec0 逐行全表扫描
+    this.db.exec(`
+      CREATE TEMP TABLE IF NOT EXISTS _tmp_del_chunks (id TEXT PRIMARY KEY);
+      DELETE FROM _tmp_del_chunks;
+    `);
+    const insertTemp = this.db.prepare(`INSERT OR IGNORE INTO _tmp_del_chunks (id) VALUES (?)`);
+    const insertBatch = this.db.transaction((batch: string[]) => {
+      for (const id of batch) insertTemp.run(id);
+    });
+    insertBatch(ids);
+
+    this.db.exec(`
+      DELETE FROM chunks WHERE id IN (SELECT id FROM _tmp_del_chunks);
+      DELETE FROM chunks_vec WHERE id IN (SELECT id FROM _tmp_del_chunks);
+      DELETE FROM chunks_fts WHERE id IN (SELECT id FROM _tmp_del_chunks);
+      DELETE FROM _tmp_del_chunks;
+    `);
+  }
+
+  /**
+   * 按 collectionId 或其前缀删除所有切片及对应的向量、全文索引。
+   */
+  removeChunksByCollection(collectionId: string): void {
+    this.db.exec(`
+      CREATE TEMP TABLE IF NOT EXISTS _tmp_del_chunks (id TEXT PRIMARY KEY);
+      DELETE FROM _tmp_del_chunks;
+    `);
+    this.db.prepare(`
+      INSERT OR IGNORE INTO _tmp_del_chunks (id)
+      SELECT id FROM chunks WHERE collection_id = ? OR collection_id LIKE ?
+    `).run(collectionId, `${collectionId}:%`);
+
+    this.db.exec(`
+      DELETE FROM chunks WHERE id IN (SELECT id FROM _tmp_del_chunks);
+      DELETE FROM chunks_vec WHERE id IN (SELECT id FROM _tmp_del_chunks);
+      DELETE FROM chunks_fts WHERE id IN (SELECT id FROM _tmp_del_chunks);
+      DELETE FROM _tmp_del_chunks;
+    `);
   }
 
   /**

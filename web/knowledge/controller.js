@@ -64,6 +64,14 @@ export class KnowledgeController {
       });
     }
 
+    // 删除当前知识库按钮
+    const deleteLibBtn = c.querySelector('#kn-delete-lib-btn');
+    if (deleteLibBtn) {
+      deleteLibBtn.addEventListener('click', () => {
+        this.deleteCurrentLibrary();
+      });
+    }
+
     // 新建库按钮
     c.querySelector('#kn-create-lib-btn').addEventListener('click', () => {
       this.showCreateLibraryDialog();
@@ -239,6 +247,28 @@ export class KnowledgeController {
     return res.json();
   }
 
+  async deleteCurrentLibrary() {
+    if (!this.currentLibraryId) {
+      alert('请先选择要删除的知识库');
+      return;
+    }
+    const currentLib = this.libraries.find((l) => l.id === this.currentLibraryId);
+    const libName = currentLib ? currentLib.name : this.currentLibraryId;
+    if (!confirm(`确定要彻底删除知识库【${libName}】(${this.currentLibraryId}) 吗？\n删除后该知识库的所有文档、切片、图谱和沉淀将被永久清空，且不可恢复。`)) {
+      return;
+    }
+    try {
+      await this.fetchApi(`/libraries/${encodeURIComponent(this.currentLibraryId)}`, {
+        method: 'DELETE',
+      });
+      alert(`知识库【${libName}】已成功删除`);
+      this.currentLibraryId = '';
+      await this.loadLibraries();
+    } catch (err) {
+      alert('删除知识库失败: ' + err.message);
+    }
+  }
+
   async loadLibraries() {
     try {
       this.libraries = await this.fetchApi('/libraries');
@@ -247,6 +277,14 @@ export class KnowledgeController {
 
       if (this.libraries.length === 0) {
         select.innerHTML = '<option value="">(暂无可访问知识库)</option>';
+        this.currentLibraryId = '';
+        this.updateScopeBadge();
+        const docsTbody = this.container.querySelector('#kn-docs-tbody');
+        if (docsTbody) docsTbody.innerHTML = '<tr><td colspan="6" class="table-empty">暂无知识库，请先新建知识库</td></tr>';
+        const srcTbody = this.container.querySelector('#kn-sources-tbody');
+        if (srcTbody) srcTbody.innerHTML = '<tr><td colspan="6" class="table-empty">暂无知识库</td></tr>';
+        const docsCount = this.container.querySelector('#kn-docs-count');
+        if (docsCount) docsCount.textContent = '共 0 篇文档';
         return;
       }
 
@@ -273,13 +311,16 @@ export class KnowledgeController {
   updateScopeBadge() {
     const currentLib = this.libraries?.find((l) => l.id === this.currentLibraryId);
     const scopeBadge = this.container?.querySelector('#kn-scope-badge');
-    if (scopeBadge && currentLib) {
-      if (currentLib.scope === 'public') {
-        scopeBadge.textContent = currentLib.role === 'basic' ? '公共基础库 (全局)' : '公共领域库 (全局)';
-      } else {
-        const wsCount = currentLib.workspaceIds?.length || 1;
-        scopeBadge.textContent = wsCount > 1 ? `项目库 (多工作区: ${wsCount})` : '当前工作区项目库';
-      }
+    if (!scopeBadge) return;
+    if (!currentLib) {
+      scopeBadge.textContent = '暂无选定库';
+      return;
+    }
+    if (currentLib.scope === 'public') {
+      scopeBadge.textContent = currentLib.role === 'basic' ? '公共基础库 (全局)' : '公共领域库 (全局)';
+    } else {
+      const wsCount = currentLib.workspaceIds?.length || 1;
+      scopeBadge.textContent = wsCount > 1 ? `项目库 (多工作区: ${wsCount})` : '当前工作区项目库';
     }
   }
 

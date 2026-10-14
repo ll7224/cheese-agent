@@ -83,6 +83,11 @@ export function initKnowledgeSchema(db: Database.Database): void {
     SELECT workspace_id, id FROM libraries
     WHERE workspace_id IS NOT NULL AND workspace_id != '';
 
+    CREATE TABLE IF NOT EXISTS deleted_libraries (
+      id TEXT PRIMARY KEY,
+      deleted_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS generation (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       version INTEGER NOT NULL DEFAULT 1

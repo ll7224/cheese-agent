@@ -49,6 +49,9 @@ export class KnowledgeStore {
       createdAt
     );
 
+    // 若该知识库此前曾被删除，重新创建时清除墓碑标记
+    this.db.prepare(`DELETE FROM deleted_libraries WHERE id = ?`).run(input.id);
+
     if (input.workspaceId) {
       this.db.prepare(`
         INSERT OR IGNORE INTO workspace_bindings (workspace_id, library_id) VALUES (?, ?)
@@ -65,6 +68,85 @@ export class KnowledgeStore {
     }
 
     return { ...input, createdAt };
+  }
+
+  /**
+   * 检查知识库是否已被显式删除（处于墓碑状态）
+   */
+  isLibraryDeleted(id: string): boolean {
+    const row = this.db.prepare(`SELECT id FROM deleted_libraries WHERE id = ?`).get(id);
+    return Boolean(row);
+  }
+
+  /**
+   * 彻底删除知识库及下属所有来源、文档、版本、分块向量/全文索引、图谱与沉淀。
+   * 记录已删除墓碑以避免初始化逻辑自动复活。
+   */
+  deleteLibrary(id: string): boolean {
+    const lib = this.getLibrary(id);
+    if (!lib) return false;
+
+    const tx = this.db.transaction(() => {
+      // 1. 获取该知识库下属的所有来源并清理文档、版本、分块索引
+      this.db.exec(`
+        CREATE TEMP TABLE IF NOT EXISTS _tmp_del_docs (id TEXT PRIMARY KEY);
+        DELETE FROM _tmp_del_docs;
+      `);
+      this.db.prepare(`
+        INSERT OR IGNORE INTO _tmp_del_docs (id)
+        SELECT d.id FROM documents d
+        JOIN sources s ON d.source_id = s.id
+        WHERE s.library_id = ?
+      `).run(id);
+
+      const chunkRows = this.db.prepare(`
+        SELECT chunk_id FROM chunk_refs WHERE document_id IN (SELECT id FROM _tmp_del_docs)
+      `).all() as Array<{ chunk_id: string }>;
+      const chunkIds = chunkRows.map((c) => c.chunk_id);
+      this.vectorStore.removeChunks(chunkIds);
+
+      this.db.exec(`
+        DELETE FROM chunk_refs WHERE document_id IN (SELECT id FROM _tmp_del_docs);
+        DELETE FROM revisions WHERE document_id IN (SELECT id FROM _tmp_del_docs);
+        DELETE FROM documents WHERE id IN (SELECT id FROM _tmp_del_docs);
+        DELETE FROM _tmp_del_docs;
+      `);
+
+      this.db.prepare(`DELETE FROM sources WHERE library_id = ?`).run(id);
+
+      // 2. 清理沉淀条目及向量
+      const items = this.db.prepare(`SELECT id FROM knowledge_items WHERE library_id = ?`).all(id) as Array<{ id: string }>;
+      for (const it of items) {
+        this.vectorStore.removeChunks([`item:${it.id}`]);
+      }
+      this.db.prepare(`DELETE FROM knowledge_items WHERE library_id = ?`).run(id);
+
+      // 3. 清理该知识库在 chunks/vec/fts 中基于 collection_id 维度的所有切片
+      this.vectorStore.removeChunksByCollection(id);
+
+      // 4. 清理图谱实体与边
+      this.db.prepare(`DELETE FROM entities WHERE library_id = ?`).run(id);
+      this.db.prepare(`
+        DELETE FROM edge_evidence WHERE edge_id IN (SELECT id FROM edges WHERE library_id = ?)
+      `).run(id);
+      this.db.prepare(`DELETE FROM edges WHERE library_id = ?`).run(id);
+
+      // 5. 清理绑定关联
+      this.db.prepare(`DELETE FROM workspace_bindings WHERE library_id = ?`).run(id);
+      this.db.prepare(`DELETE FROM bindings WHERE library_id = ?`).run(id);
+
+      // 6. 清理知识库本体
+      this.db.prepare(`DELETE FROM libraries WHERE id = ?`).run(id);
+
+      // 7. 写入已删除墓碑记录，防止再次被 attachWorkspace 自动创建
+      this.db.prepare(`INSERT OR REPLACE INTO deleted_libraries (id, deleted_at) VALUES (?, ?)`).run(id, Date.now());
+
+      // 8. 递增全局 generation
+      this.db.prepare(`UPDATE generation SET version = version + 1 WHERE id = 1`).run();
+    });
+
+    tx();
+    return true;
   }
 
   /**

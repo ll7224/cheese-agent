@@ -724,3 +724,100 @@ test('P3-Scenario 12: 知识库多工作区自主绑定与跨工作区隔离权�
   );
 });
 
+test('P3-Scenario 13: 知识库彻底删除与级联清理、已删除墓碑隔离与防重复创建测试 (Library Deletion & Cascade Cleanup)', async (t) => {
+  const env = createKnowledgeTestEnv(t);
+  const store = env.store;
+  const service = new KnowledgeService({
+    dataDir: env.tempDir,
+    store,
+  });
+
+  const ctx: KnowledgeContext = {
+    workspaceId: 'ws-del',
+    workspacePath: env.tempDir,
+    agentId: 'general',
+    role: 'owner',
+  };
+
+  // 1. 接入工作区，生成默认库
+  service.attachWorkspace(ctx);
+  const projectLibId = 'project:ws-del';
+  assert.ok(store.getLibrary(projectLibId), '默认项目库已创建');
+  assert.ok(store.getLibrary('public-basic'), '默认公共基础库已创建');
+
+  // 2. 在 projectLib 中创建来源、文档、版本和分块
+  const source = store.createSource({
+    id: 'src-del-1',
+    libraryId: projectLibId,
+    kind: 'local',
+    locator: 'docs/test-delete.md',
+    enabled: true,
+  });
+
+  const rev = store.publishRevision({
+    sourceId: source.id,
+    sourceKey: 'docs/test-delete.md',
+    content: '测试待删除知识库的内容，必须包含有效分块以验证清理。',
+    hash: 'hash-del-1',
+    expectedPreviousRevisionId: null,
+    chunks: [
+      {
+        text: '测试待删除知识库的内容，必须包含有效分块以验证清理。',
+        span: { startOffset: 0, endOffset: 27, startLine: 1, endLine: 1 },
+      },
+    ],
+  });
+
+  // 创建一条沉淀知识条目
+  store.createKnowledgeItem({
+    id: 'item-del-1',
+    kind: 'rule',
+    status: 'effective',
+    text: '待删除库中的规则沉淀',
+    libraryId: projectLibId,
+    evidenceIds: [],
+  });
+
+  // 验证数据已写入
+  assert.ok(store.getSource('src-del-1'));
+  assert.ok(store.getDocumentById(rev.documentId));
+  assert.ok(store.getKnowledgeItem('item-del-1'));
+
+  // 3. 执行删除知识库
+  const deleteResult = store.deleteLibrary(projectLibId);
+  assert.equal(deleteResult, true, 'deleteLibrary 应该返回 true');
+
+  // 4. 验证级联清理完成
+  assert.equal(store.getLibrary(projectLibId), null, '知识库已被删除');
+  assert.equal(store.getSource('src-del-1'), null, '来源已被级联删除');
+  assert.equal(store.getDocumentById(rev.documentId), null, '文档已被级联删除');
+  assert.equal(store.listRevisions(rev.documentId).length, 0, '版本已被级联删除');
+  assert.equal(store.getKnowledgeItem('item-del-1'), null, '沉淀条目已被级联删除');
+  assert.equal(store.isLibraryDeleted(projectLibId), true, '知识库已被记录在墓碑表中');
+
+  // 5. 验证 attachWorkspace 不会复活已删除的项目库
+  service.attachWorkspace(ctx);
+  assert.equal(store.getLibrary(projectLibId), null, 'attachWorkspace 不得重新创建已删除的项目库');
+
+  // 6. 测试删除 public-basic 库并验证防复活
+  const deletePublicResult = store.deleteLibrary('public-basic');
+  assert.equal(deletePublicResult, true, 'deleteLibrary public-basic 成功');
+  assert.equal(store.getLibrary('public-basic'), null, 'public-basic 已被删除');
+  assert.equal(store.isLibraryDeleted('public-basic'), true, 'public-basic 处于墓碑状态');
+
+  service.attachWorkspace(ctx);
+  assert.equal(store.getLibrary('public-basic'), null, 'attachWorkspace 不得重新创建已删除的 public-basic');
+
+  // 7. 测试显式创建同名知识库会清除墓碑
+  store.createLibrary({
+    id: projectLibId,
+    name: 'Recreated Project Lib',
+    description: '重新显式创建的库',
+    scope: 'project',
+    workspaceId: 'ws-del',
+    role: 'project',
+  });
+  assert.equal(store.isLibraryDeleted(projectLibId), false, '显式重新创建后清除墓碑');
+  assert.ok(store.getLibrary(projectLibId), '显式重新创建成功');
+});
+

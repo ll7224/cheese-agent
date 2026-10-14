@@ -89,11 +89,11 @@ export class KnowledgeService {
   }
 
   /**
-   * 幂等接入工作区，创建私有 project 库与共享 public-basic 库
+   * 幂等接入工作区，创建私有 project 库与共享 public-basic 库（若已被用户显式删除则不重复创建）
    */
   attachWorkspace(ctx: KnowledgeContext): void {
     const projectLibId = `project:${ctx.workspaceId}`;
-    if (!this.store.getLibrary(projectLibId)) {
+    if (!this.store.isLibraryDeleted(projectLibId) && !this.store.getLibrary(projectLibId)) {
       this.store.createLibrary({
         id: projectLibId,
         name: `Project (${ctx.workspaceId})`,
@@ -102,11 +102,10 @@ export class KnowledgeService {
         workspaceId: ctx.workspaceId,
         role: 'project',
       });
+      addWorkspaceBinding(this.store.db, ctx.workspaceId, projectLibId);
     }
 
-    addWorkspaceBinding(this.store.db, ctx.workspaceId, projectLibId);
-
-    if (!this.store.getLibrary('public-basic')) {
+    if (!this.store.isLibraryDeleted('public-basic') && !this.store.getLibrary('public-basic')) {
       this.store.createLibrary({
         id: 'public-basic',
         name: 'Public Basic',
