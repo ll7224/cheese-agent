@@ -507,6 +507,12 @@
 }
 
 /* Modals */
+dialog:not([open]),
+.kn-modal:not([open]),
+.kn-modal-wide:not([open]) {
+  display: none !important;
+}
+
 .kn-modal {
   border: 1px solid var(--line-strong);
   border-radius: 12px;
@@ -928,6 +934,9 @@
   max-width: 900px;
   width: 94vw;
   max-height: 88vh;
+}
+
+.kn-modal-wide[open] {
   display: flex;
   flex-direction: column;
 }

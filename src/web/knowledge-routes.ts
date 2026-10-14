@@ -33,6 +33,13 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     return { ctx, workspace: ws };
   }
 
+  function getManageableLibraryIds(ctx: KnowledgeContext): string[] {
+    const allLibs = runtime.knowledgeService.store.listLibraries();
+    return allLibs
+      .filter((l) => (l.scope === 'project' && l.workspaceId === ctx.workspaceId) || l.scope === 'public')
+      .map((l) => l.id);
+  }
+
   // 1. GET/POST /api/v1/workspaces/:id/knowledge/libraries
   routes.get('/api/v1/workspaces/:id/knowledge/libraries', (context) => {
     const { ctx } = getContext(context.req.param('id'));
@@ -40,7 +47,7 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     const offset = Math.max(Number(context.req.query('offset') || 0), 0);
 
     const allLibs = runtime.knowledgeService.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = getManageableLibraryIds(ctx);
     const accessibleLibs = allLibs.filter((l) => accessibleIds.includes(l.id));
 
     return context.json(accessibleLibs.slice(offset, offset + limit));
@@ -79,8 +86,7 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     const limit = Math.min(Math.max(Number(context.req.query('limit') || 50), 1), 100);
     const offset = Math.max(Number(context.req.query('offset') || 0), 0);
 
-    const allLibs = runtime.knowledgeService.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = getManageableLibraryIds(ctx);
 
     if (libraryId && !accessibleIds.includes(libraryId)) {
       throw new RuntimeError('知识库不存在或无权访问', 404);
@@ -99,10 +105,22 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
       return context.json({ error: 'libraryId 和 locator 必填' }, 400);
     }
 
-    const allLibs = runtime.knowledgeService.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(body.libraryId)) {
       throw new RuntimeError('目标知识库不存在或无权访问', 404);
+    }
+
+    const existing = runtime.knowledgeService.store
+      .listSources(body.libraryId)
+      .find((s) => s.locator === body.locator);
+    if (existing) {
+      if (body.enabled && !existing.enabled) {
+        runtime.knowledgeService.store.updateSource(existing.id, { enabled: true });
+        await runtime.knowledgeService.enableSource(ctx, existing.id);
+      } else if (body.enabled) {
+        await runtime.knowledgeService.syncSource(ctx, existing.id);
+      }
+      return context.json(runtime.knowledgeService.store.getSource(existing.id), 200);
     }
 
     const sourceId = `src-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -139,8 +157,7 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
       throw new RuntimeError('来源不存在', 404);
     }
 
-    const allLibs = runtime.knowledgeService.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(source.libraryId)) {
       throw new RuntimeError('来源无权访问', 404);
     }
@@ -168,8 +185,7 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
       throw new RuntimeError('来源不存在', 404);
     }
 
-    const allLibs = runtime.knowledgeService.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = getManageableLibraryIds(ctx);
     if (!accessibleIds.includes(source.libraryId)) {
       throw new RuntimeError('来源无权访问', 404);
     }
@@ -187,8 +203,7 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     const limit = Math.min(Math.max(Number(context.req.query('limit') || 50), 1), 100);
     const offset = Math.max(Number(context.req.query('offset') || 0), 0);
 
-    const allLibs = runtime.knowledgeService.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = getManageableLibraryIds(ctx);
 
     if (libraryId && !accessibleIds.includes(libraryId)) {
       throw new RuntimeError('知识库不存在或无权访问', 404);

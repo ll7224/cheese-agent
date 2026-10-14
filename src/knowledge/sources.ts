@@ -99,6 +99,36 @@ export async function discoverWorkspaceSources(
 
   const projectLibId = `project:${ctx.workspaceId}`;
 
+  // 1. 优先推荐常见规范目录作为目录级知识来源（docs/、src/ 等），便于一键全量接入
+  const commonDirs = [
+    { dir: 'docs', reason: '工程技术文档与架构决策目录 (docs/)' },
+    { dir: 'doc', reason: '工程技术文档目录 (doc/)' },
+    { dir: 'src', reason: '工程核心源码目录 (src/)' },
+    { dir: '.agents', reason: '智能体提示词与规范目录 (.agents/)' },
+  ];
+
+  for (const { dir, reason } of commonDirs) {
+    const fullDirPath = path.join(realRoot, dir);
+    if (fs.existsSync(fullDirPath)) {
+      try {
+        const stat = fs.lstatSync(fullDirPath);
+        if (stat.isDirectory() && !stat.isSymbolicLink()) {
+          const id = `src-local-${dir.replace(/[^a-zA-Z0-9]/g, '_')}`;
+          proposals.push({
+            id,
+            sourceId: id,
+            libraryId: projectLibId,
+            kind: 'local',
+            locator: dir,
+            enabled: false,
+            reason,
+            syncStatus: 'ready',
+          });
+        }
+      } catch {}
+    }
+  }
+
   for (const rel of entries) {
     if (isIgnoredKnowledgePath(rel)) continue;
 

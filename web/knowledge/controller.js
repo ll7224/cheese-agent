@@ -148,6 +148,35 @@ export class KnowledgeController {
       });
     }
 
+    // 扫描并同步 docs/
+    const scanDocsBtn = c.querySelector('#kn-scan-docs-toolbar-btn');
+    if (scanDocsBtn) {
+      scanDocsBtn.addEventListener('click', async () => {
+        scanDocsBtn.disabled = true;
+        scanDocsBtn.textContent = '正在扫描并同步 docs…';
+        try {
+          await this.fetchApi('/sources', {
+            method: 'POST',
+            body: {
+              libraryId: this.currentLibraryId,
+              kind: 'local',
+              locator: 'docs',
+              enabled: true,
+            },
+          });
+          await this.loadSources();
+          await this.loadDiscoveries();
+          await this.loadDocuments();
+          alert('docs/ 目录扫描与同步完成！文档与版本切片已就绪。');
+        } catch (err) {
+          alert('扫描并同步 docs 失败: ' + err.message);
+        } finally {
+          scanDocsBtn.disabled = false;
+          scanDocsBtn.textContent = '📁 扫描并同步 docs/';
+        }
+      });
+    }
+
     // 批量提炼知识
     const extractAllDocsBtn = c.querySelector('#kn-extract-all-docs-btn');
     if (extractAllDocsBtn) {
@@ -239,7 +268,42 @@ export class KnowledgeController {
       this.container.querySelector('#kn-docs-next-btn').disabled = docs.length < this.docLimit;
 
       if (docs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="table-empty">当前知识库暂无文档记录</td></tr>';
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" class="table-empty">
+              <div style="padding: 16px 0; text-align: center;">
+                <p style="margin: 0 0 6px 0; font-weight: 500;">当前知识库暂无已索引文档记录</p>
+                <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 12px 0;">系统支持一键扫描工程 docs/ 目录并自动建立知识切片索引与提炼。</p>
+                <button id="kn-quick-sync-docs-btn" class="action-tag-btn" type="button">📁 一键扫描并同步 docs 目录</button>
+              </div>
+            </td>
+          </tr>
+        `;
+        const syncDocsBtn = tbody.querySelector('#kn-quick-sync-docs-btn');
+        if (syncDocsBtn) {
+          syncDocsBtn.addEventListener('click', async () => {
+            syncDocsBtn.disabled = true;
+            syncDocsBtn.textContent = '正在扫描并同步 docs…';
+            try {
+              await this.fetchApi('/sources', {
+                method: 'POST',
+                body: {
+                  libraryId: this.currentLibraryId,
+                  kind: 'local',
+                  locator: 'docs',
+                  enabled: true,
+                },
+              });
+              await this.loadSources();
+              await this.loadDiscoveries();
+              await this.loadDocuments();
+            } catch (err) {
+              alert('同步 docs 目录失败: ' + err.message);
+              syncDocsBtn.disabled = false;
+              syncDocsBtn.textContent = '📁 一键扫描并同步 docs 目录';
+            }
+          });
+        }
         return;
       }
 
@@ -384,6 +448,7 @@ export class KnowledgeController {
             });
             await this.loadSources();
             await this.loadDiscoveries();
+            await this.loadDocuments();
           } catch (err) {
             alert('启用来源失败: ' + err.message);
             btn.disabled = false;
@@ -546,11 +611,51 @@ export class KnowledgeController {
     }
   }
 
+  // --- 通用弹窗安全管理 ---
+
+  openModal(html, setupFn) {
+    const root = this.container.querySelector('#kn-dialogs-root');
+    root.innerHTML = html;
+    const dialog = root.querySelector('dialog');
+    if (!dialog) return;
+
+    let isClosed = false;
+    const closeModal = () => {
+      if (isClosed) return;
+      isClosed = true;
+      try {
+        if (dialog.open) dialog.close();
+      } catch {}
+      root.innerHTML = '';
+    };
+
+    dialog.addEventListener('close', () => {
+      closeModal();
+    });
+
+    root.querySelectorAll('.btn-close-modal').forEach((b) => {
+      b.addEventListener('click', (e) => {
+        e.preventDefault();
+        closeModal();
+      });
+    });
+
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) {
+        closeModal();
+      }
+    });
+
+    dialog.showModal();
+    if (setupFn) {
+      setupFn(dialog, closeModal);
+    }
+  }
+
   // --- 弹窗逻辑 ---
 
   showCreateLibraryDialog() {
-    const root = this.container.querySelector('#kn-dialogs-root');
-    root.innerHTML = `
+    const html = `
       <dialog id="kn-modal-lib" class="kn-modal">
         <div class="dialog-heading">
           <div class="dialog-title-group">
@@ -583,34 +688,34 @@ export class KnowledgeController {
       </dialog>
     `;
 
-    const dialog = root.querySelector('#kn-modal-lib');
-    dialog.showModal();
-    root.querySelectorAll('.btn-close-modal').forEach((b) => b.addEventListener('click', () => dialog.close()));
+    this.openModal(html, (dialog, closeModal) => {
+      dialog.querySelector('#kn-create-lib-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = dialog.querySelector('#kn-lib-name-input').value.trim();
+        const description = dialog.querySelector('#kn-lib-desc-input').value.trim();
+        const scope = dialog.querySelector('#kn-lib-scope-select').value;
 
-    root.querySelector('#kn-create-lib-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const name = root.querySelector('#kn-lib-name-input').value.trim();
-      const description = root.querySelector('#kn-lib-desc-input').value.trim();
-      const scope = root.querySelector('#kn-lib-scope-select').value;
-
-      try {
-        await this.fetchApi('/libraries', {
-          method: 'POST',
-          body: { name, description, scope },
-        });
-        dialog.close();
-        await this.loadLibraries();
-      } catch (err) {
-        alert('创建知识库失败: ' + err.message);
-      }
+        try {
+          const created = await this.fetchApi('/libraries', {
+            method: 'POST',
+            body: { name, description, scope },
+          });
+          closeModal();
+          if (created && created.id) {
+            this.currentLibraryId = created.id;
+          }
+          await this.loadLibraries();
+          alert(`知识库「${created.name}」创建成功！已切换为当前工作知识库。`);
+        } catch (err) {
+          alert('创建知识库失败: ' + err.message);
+        }
+      });
     });
   }
 
   showImportDocumentDialog() {
-    const root = this.container.querySelector('#kn-dialogs-root');
     const targetProjectLibId = `project:${this.workspaceId}`;
-
-    root.innerHTML = `
+    const html = `
       <dialog id="kn-modal-import" class="kn-modal">
         <div class="dialog-heading">
           <div class="dialog-title-group">
@@ -647,46 +752,43 @@ export class KnowledgeController {
       </dialog>
     `;
 
-    const dialog = root.querySelector('#kn-modal-import');
-    dialog.showModal();
-    root.querySelectorAll('.btn-close-modal').forEach((b) => b.addEventListener('click', () => dialog.close()));
-
-    const modeRadios = root.querySelectorAll('input[name="import-mode"]');
-    modeRadios.forEach((r) => {
-      r.addEventListener('change', () => {
-        const isPath = r.value === 'path';
-        root.querySelector('#wrap-import-content').hidden = isPath;
-        root.querySelector('#wrap-import-path').hidden = !isPath;
+    this.openModal(html, (dialog, closeModal) => {
+      const modeRadios = dialog.querySelectorAll('input[name="import-mode"]');
+      modeRadios.forEach((r) => {
+        r.addEventListener('change', () => {
+          const isPath = r.value === 'path';
+          dialog.querySelector('#wrap-import-content').hidden = isPath;
+          dialog.querySelector('#wrap-import-path').hidden = !isPath;
+        });
       });
-    });
 
-    root.querySelector('#kn-import-doc-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const isPath = root.querySelector('input[name="import-mode"]:checked').value === 'path';
-      const name = root.querySelector('#kn-import-name').value.trim();
-      const content = root.querySelector('#kn-import-content').value;
-      const path = root.querySelector('#kn-import-path').value.trim();
+      dialog.querySelector('#kn-import-doc-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const isPath = dialog.querySelector('input[name="import-mode"]:checked').value === 'path';
+        const name = dialog.querySelector('#kn-import-name').value.trim();
+        const content = dialog.querySelector('#kn-import-content').value;
+        const path = dialog.querySelector('#kn-import-path').value.trim();
 
-      const body = {
-        libraryId: targetProjectLibId,
-        name: name || undefined,
-        content: !isPath ? content : undefined,
-        path: isPath ? path : undefined,
-      };
+        const body = {
+          libraryId: targetProjectLibId,
+          name: name || undefined,
+          content: !isPath ? content : undefined,
+          path: isPath ? path : undefined,
+        };
 
-      try {
-        await this.fetchApi('/documents', { method: 'POST', body });
-        dialog.close();
-        await this.loadDocuments();
-      } catch (err) {
-        alert('导入文档失败: ' + err.message);
-      }
+        try {
+          await this.fetchApi('/documents', { method: 'POST', body });
+          closeModal();
+          await this.loadDocuments();
+        } catch (err) {
+          alert('导入文档失败: ' + err.message);
+        }
+      });
     });
   }
 
   showEditDocumentDialog(doc) {
-    const root = this.container.querySelector('#kn-dialogs-root');
-    root.innerHTML = `
+    const html = `
       <dialog id="kn-modal-edit" class="kn-modal">
         <div class="dialog-heading">
           <div class="dialog-title-group">
@@ -711,27 +813,25 @@ export class KnowledgeController {
       </dialog>
     `;
 
-    const dialog = root.querySelector('#kn-modal-edit');
-    dialog.showModal();
-    root.querySelectorAll('.btn-close-modal').forEach((b) => b.addEventListener('click', () => dialog.close()));
+    this.openModal(html, (dialog, closeModal) => {
+      dialog.querySelector('#kn-edit-doc-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const content = dialog.querySelector('#kn-edit-content').value;
 
-    root.querySelector('#kn-edit-doc-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const content = root.querySelector('#kn-edit-content').value;
-
-      try {
-        const res = await this.fetchApi(`/documents/${doc.id}`, {
-          method: 'PATCH',
-          body: { content },
-        });
-        if (res.message) {
-          alert(res.message);
+        try {
+          const res = await this.fetchApi(`/documents/${doc.id}`, {
+            method: 'PATCH',
+            body: { content },
+          });
+          if (res.message) {
+            alert(res.message);
+          }
+          closeModal();
+          await this.loadDocuments();
+        } catch (err) {
+          alert('更新文档失败: ' + err.message);
         }
-        dialog.close();
-        await this.loadDocuments();
-      } catch (err) {
-        alert('更新文档失败: ' + err.message);
-      }
+      });
     });
   }
 
@@ -749,8 +849,7 @@ export class KnowledgeController {
   }
 
   async showRevisionsDialog(doc) {
-    const root = this.container.querySelector('#kn-dialogs-root');
-    root.innerHTML = `
+    const html = `
       <dialog id="kn-modal-revs" class="kn-modal">
         <div class="dialog-heading">
           <div class="dialog-title-group">
@@ -765,9 +864,52 @@ export class KnowledgeController {
       </dialog>
     `;
 
-    const dialog = root.querySelector('#kn-modal-revs');
-    dialog.showModal();
-    root.querySelectorAll('.btn-close-modal').forEach((b) => b.addEventListener('click', () => dialog.close()));
+    this.openModal(html, async (dialog, closeModal) => {
+      const listBody = dialog.querySelector('.revisions-list-body');
+      try {
+        const revs = await this.fetchApi(`/documents/${doc.id}/revisions`);
+        if (!revs || revs.length === 0) {
+          listBody.innerHTML = '<div class="table-empty">无版本历史记录</div>';
+          return;
+        }
+
+        listBody.innerHTML = `
+          <table class="kn-table">
+            <thead>
+              <tr>
+                <th>版本 ID</th>
+                <th>SHA-256 Hash</th>
+                <th>Git 提交</th>
+                <th>发布时间</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${revs
+                .map((r) => {
+                  const isCurrent = r.id === doc.activeRevisionId;
+                  const statusTag = isCurrent
+                    ? '<span class="status-badge-current">● 当前生效</span>'
+                    : '<span class="status-badge-historic">历史</span>';
+                  return `
+                  <tr>
+                    <td><code>${escapeHtml(r.id)}</code></td>
+                    <td><code class="hash-tag">${escapeHtml(r.hash.slice(0, 10))}</code></td>
+                    <td><code>${escapeHtml(r.commitHash ? r.commitHash.slice(0, 8) : '-')}</code></td>
+                    <td>${escapeHtml(new Date(r.createdAt).toLocaleString())}</td>
+                    <td>${statusTag}</td>
+                  </tr>
+                `;
+                })
+                .join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (err) {
+        listBody.innerHTML = `<div class="table-error">获取版本失败: ${escapeHtml(err.message)}</div>`;
+      }
+    });
+  }
 
     const listBody = root.querySelector('.revisions-list-body');
     try {
@@ -831,8 +973,7 @@ export class KnowledgeController {
   }
 
   showAddSourceDialog() {
-    const root = this.container.querySelector('#kn-dialogs-root');
-    root.innerHTML = `
+    const html = `
       <dialog id="kn-modal-source" class="kn-modal">
         <div class="dialog-heading">
           <div class="dialog-title-group">
@@ -873,31 +1014,29 @@ export class KnowledgeController {
       </dialog>
     `;
 
-    const dialog = root.querySelector('#kn-modal-source');
-    dialog.showModal();
-    root.querySelectorAll('.btn-close-modal').forEach((b) => b.addEventListener('click', () => dialog.close()));
+    this.openModal(html, (dialog, closeModal) => {
+      dialog.querySelector('#kn-add-source-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const kind = dialog.querySelector('#kn-source-kind').value;
+        const locator = dialog.querySelector('#kn-source-locator').value.trim();
+        const enabled = dialog.querySelector('#kn-source-enabled').checked;
 
-    root.querySelector('#kn-add-source-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const kind = root.querySelector('#kn-source-kind').value;
-      const locator = root.querySelector('#kn-source-locator').value.trim();
-      const enabled = root.querySelector('#kn-source-enabled').checked;
-
-      try {
-        await this.fetchApi('/sources', {
-          method: 'POST',
-          body: {
-            libraryId: this.currentLibraryId,
-            kind,
-            locator,
-            enabled,
-          },
-        });
-        dialog.close();
-        await this.loadSources();
-      } catch (err) {
-        alert('添加来源失败: ' + err.message);
-      }
+        try {
+          await this.fetchApi('/sources', {
+            method: 'POST',
+            body: {
+              libraryId: this.currentLibraryId,
+              kind,
+              locator,
+              enabled,
+            },
+          });
+          closeModal();
+          await this.loadSources();
+        } catch (err) {
+          alert('添加来源失败: ' + err.message);
+        }
+      });
     });
   }
 
@@ -952,8 +1091,7 @@ export class KnowledgeController {
   }
 
   showCorrectItemDialog(item) {
-    const root = this.container.querySelector('#kn-dialogs-root');
-    root.innerHTML = `
+    const html = `
       <dialog id="kn-modal-correct" class="kn-modal">
         <div class="dialog-heading">
           <div class="dialog-title-group">
@@ -979,31 +1117,28 @@ export class KnowledgeController {
       </dialog>
     `;
 
-    const dialog = root.querySelector('#kn-modal-correct');
-    dialog.showModal();
-    root.querySelectorAll('.btn-close-modal').forEach((b) => b.addEventListener('click', () => dialog.close()));
+    this.openModal(html, (dialog, closeModal) => {
+      dialog.querySelector('#kn-correct-item-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const replacement = dialog.querySelector('#kn-correct-text').value.trim();
+        if (!replacement) return;
 
-    root.querySelector('#kn-correct-item-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const replacement = root.querySelector('#kn-correct-text').value.trim();
-      if (!replacement) return;
-
-      try {
-        await this.fetchApi(`/items/${item.id}/correct`, {
-          method: 'POST',
-          body: { replacement },
-        });
-        dialog.close();
-        await this.loadItems();
-      } catch (err) {
-        alert('纠错失败: ' + err.message);
-      }
+        try {
+          await this.fetchApi(`/items/${item.id}/correct`, {
+            method: 'POST',
+            body: { replacement },
+          });
+          closeModal();
+          await this.loadItems();
+        } catch (err) {
+          alert('纠错失败: ' + err.message);
+        }
+      });
     });
   }
 
   async showExtractDialog(doc) {
-    const root = this.container.querySelector('#kn-dialogs-root');
-    root.innerHTML = `
+    const html = `
       <dialog id="kn-modal-extract-review" class="kn-modal kn-modal-wide">
         <div class="dialog-heading">
           <div class="dialog-title-group">
@@ -1029,197 +1164,30 @@ export class KnowledgeController {
       </dialog>
     `;
 
-    const dialog = root.querySelector('#kn-modal-extract-review');
-    dialog.showModal();
-    root.querySelectorAll('.btn-close-modal').forEach((b) => b.addEventListener('click', () => dialog.close()));
+    this.openModal(html, async (dialog, closeModal) => {
+      const bodyContainer = dialog.querySelector('.extract-body-container');
+      const commitBtn = dialog.querySelector('#kn-btn-commit-extract');
+      const selectAllBtn = dialog.querySelector('.btn-select-all');
+      const deselectAllBtn = dialog.querySelector('.btn-deselect-all');
 
-    const bodyContainer = root.querySelector('.extract-body-container');
-    const commitBtn = root.querySelector('#kn-btn-commit-extract');
-    const selectAllBtn = root.querySelector('.btn-select-all');
-    const deselectAllBtn = root.querySelector('.btn-deselect-all');
-
-    try {
-      const drafts = await this.fetchApi(`/documents/${doc.id}/extract/preview`, {
-        method: 'POST',
-      });
-
-      if (!drafts || drafts.length === 0) {
-        bodyContainer.innerHTML = '<div class="table-empty">未在此文档中提炼出明确的架构决议、约束或最佳实践条目。</div>';
-        return;
-      }
-
-      bodyContainer.innerHTML = `
-        <div class="extract-items-list" id="kn-extract-cards-list"></div>
-      `;
-      const cardsList = bodyContainer.querySelector('#kn-extract-cards-list');
-
-      drafts.forEach((draft, idx) => {
-        const card = document.createElement('div');
-        card.className = 'extract-item-card';
-        card.dataset.index = idx;
-
-        const entityBadges = (draft.matchedEntityNames || [])
-          .map((name) => `<span class="entity-badge">🏷️ ${escapeHtml(name)}</span>`)
-          .join('');
-
-        card.innerHTML = `
-          <input type="checkbox" class="extract-item-cb" checked />
-          <div class="extract-item-main">
-            <div class="extract-item-controls">
-              <select class="kn-mini-select draft-kind">
-                <option value="decision" ${draft.kind === 'decision' ? 'selected' : ''}>架构决策 (decision)</option>
-                <option value="observation" ${draft.kind === 'observation' ? 'selected' : ''}>规则约束 (observation)</option>
-                <option value="experience" ${draft.kind === 'experience' ? 'selected' : ''}>候选建议 (experience)</option>
-              </select>
-              <select class="kn-mini-select draft-status">
-                <option value="candidate" ${draft.status === 'candidate' ? 'selected' : ''}>候选待验证 (candidate)</option>
-                <option value="effective" ${draft.status === 'effective' ? 'selected' : ''}>正式生效 (effective)</option>
-              </select>
-              <span class="extract-line-tag">行 ${draft.startLine}</span>
-            </div>
-            <textarea class="extract-item-textarea draft-text" rows="2">${escapeHtml(draft.text)}</textarea>
-            <div class="extract-item-meta">
-              <div class="extract-snippet"><strong>原文:</strong> <code>${escapeHtml(draft.sourceSnippet || '')}</code></div>
-              ${entityBadges ? `<div class="extract-entities"><strong>关联代码实体:</strong> ${entityBadges}</div>` : ''}
-            </div>
-          </div>
-        `;
-        cardsList.appendChild(card);
-      });
-
-      const updateCommitBtn = () => {
-        const checkedCount = cardsList.querySelectorAll('.extract-item-cb:checked').length;
-        commitBtn.textContent = `确认入库 (${checkedCount} 条)`;
-        commitBtn.disabled = checkedCount === 0;
-      };
-
-      cardsList.querySelectorAll('.extract-item-cb').forEach((cb) => {
-        cb.addEventListener('change', updateCommitBtn);
-      });
-
-      selectAllBtn.addEventListener('click', () => {
-        cardsList.querySelectorAll('.extract-item-cb').forEach((cb) => (cb.checked = true));
-        updateCommitBtn();
-      });
-
-      deselectAllBtn.addEventListener('click', () => {
-        cardsList.querySelectorAll('.extract-item-cb').forEach((cb) => (cb.checked = !cb.checked));
-        updateCommitBtn();
-      });
-
-      updateCommitBtn();
-
-      commitBtn.addEventListener('click', async () => {
-        const selectedDrafts = [];
-        const cardEls = cardsList.querySelectorAll('.extract-item-card');
-        cardEls.forEach((card) => {
-          const cb = card.querySelector('.extract-item-cb');
-          if (!cb.checked) return;
-          const idx = parseInt(card.dataset.index, 10);
-          const orig = drafts[idx];
-          const kind = card.querySelector('.draft-kind').value;
-          const status = card.querySelector('.draft-status').value;
-          const text = card.querySelector('.draft-text').value.trim();
-          if (!text) return;
-          selectedDrafts.push({
-            ...orig,
-            kind,
-            status,
-            text,
-          });
+      try {
+        const drafts = await this.fetchApi(`/documents/${doc.id}/extract/preview`, {
+          method: 'POST',
         });
 
-        if (selectedDrafts.length === 0) return;
-
-        commitBtn.disabled = true;
-        commitBtn.textContent = '入库中…';
-        try {
-          const res = await this.fetchApi(`/documents/${doc.id}/extract/commit`, {
-            method: 'POST',
-            body: { items: selectedDrafts },
-          });
-          dialog.close();
-          alert(`提炼完成！成功沉淀 ${res.length} 条工程知识。`);
-          await this.loadItems();
-          await this.loadDocuments();
-        } catch (err) {
-          alert('提炼知识入库失败: ' + err.message);
-          commitBtn.disabled = false;
-          updateCommitBtn();
+        if (!drafts || drafts.length === 0) {
+          bodyContainer.innerHTML = '<div class="table-empty">未在此文档中提炼出明确的架构决议、约束或最佳实践条目。</div>';
+          return;
         }
-      });
-    } catch (err) {
-      bodyContainer.innerHTML = `<div class="table-error">提炼预览失败: ${escapeHtml(err.message)}</div>`;
-    }
-  }
 
-  async showBatchExtractDialog() {
-    const root = this.container.querySelector('#kn-dialogs-root');
-    root.innerHTML = `
-      <dialog id="kn-modal-extract-review" class="kn-modal kn-modal-wide">
-        <div class="dialog-heading">
-          <div class="dialog-title-group">
-            <span class="dialog-badge">批量知识提炼</span>
-            <h2>工作区文档批量提炼与沉淀</h2>
-          </div>
-          <button class="icon-button btn-close-modal" type="button">✕</button>
-        </div>
-        <div class="extract-review-banner">
-          <span>💡 扫描工作区工程文档并提炼规则，确认后批量持久化并关联代码图谱。</span>
-          <div class="extract-batch-actions">
-            <button type="button" class="mini-text-btn btn-select-all">全选</button>
-            <button type="button" class="mini-text-btn btn-deselect-all">反选</button>
-          </div>
-        </div>
-        <div class="extract-body-container">
-          <div class="loading-spinner">正在扫描工作区所有技术文档…</div>
-        </div>
-        <div class="form-actions" style="margin-top: 16px;">
-          <button type="button" class="ghost-btn btn-close-modal">取消</button>
-          <button type="button" id="kn-btn-commit-batch-extract" class="send-button" disabled>确认批量入库 (0 条)</button>
-        </div>
-      </dialog>
-    `;
+        bodyContainer.innerHTML = `
+          <div class="extract-items-list" id="kn-extract-cards-list"></div>
+        `;
+        const cardsList = bodyContainer.querySelector('#kn-extract-cards-list');
 
-    const dialog = root.querySelector('#kn-modal-extract-review');
-    dialog.showModal();
-    root.querySelectorAll('.btn-close-modal').forEach((b) => b.addEventListener('click', () => dialog.close()));
-
-    const bodyContainer = root.querySelector('.extract-body-container');
-    const commitBtn = root.querySelector('#kn-btn-commit-batch-extract');
-    const selectAllBtn = root.querySelector('.btn-select-all');
-    const deselectAllBtn = root.querySelector('.btn-deselect-all');
-
-    try {
-      const results = await this.fetchApi('/extract-docs/preview', {
-        method: 'POST',
-        body: { libraryId: this.currentLibraryId || undefined },
-      });
-
-      const totalItems = (results || []).reduce((sum, r) => sum + (r.items ? r.items.length : 0), 0);
-
-      if (!results || results.length === 0 || totalItems === 0) {
-        bodyContainer.innerHTML = '<div class="table-empty">当前知识库文档中未检测到符合条件的知识条目。</div>';
-        return;
-      }
-
-      bodyContainer.innerHTML = `
-        <div class="extract-items-list" id="kn-extract-batch-list"></div>
-      `;
-      const batchList = bodyContainer.querySelector('#kn-extract-batch-list');
-
-      results.forEach((docRes) => {
-        if (!docRes.items || docRes.items.length === 0) return;
-
-        const groupHeader = document.createElement('div');
-        groupHeader.className = 'draft-group-header';
-        groupHeader.innerHTML = `📄 <strong>${escapeHtml(docRes.sourceKey)}</strong> <span style="font-size: 11px; color: var(--text-muted); font-weight: normal;">(${docRes.items.length} 条)</span>`;
-        batchList.appendChild(groupHeader);
-
-        docRes.items.forEach((draft, idx) => {
+        drafts.forEach((draft, idx) => {
           const card = document.createElement('div');
           card.className = 'extract-item-card';
-          card.dataset.docId = docRes.documentId;
           card.dataset.index = idx;
 
           const entityBadges = (draft.matchedEntityNames || [])
@@ -1248,83 +1216,245 @@ export class KnowledgeController {
               </div>
             </div>
           `;
-          batchList.appendChild(card);
+          cardsList.appendChild(card);
         });
-      });
 
-      const updateCommitBtn = () => {
-        const checkedCount = batchList.querySelectorAll('.extract-item-cb:checked').length;
-        commitBtn.textContent = `确认批量入库 (${checkedCount} 条)`;
-        commitBtn.disabled = checkedCount === 0;
-      };
+        const updateCommitBtn = () => {
+          const checkedCount = cardsList.querySelectorAll('.extract-item-cb:checked').length;
+          commitBtn.textContent = `确认入库 (${checkedCount} 条)`;
+          commitBtn.disabled = checkedCount === 0;
+        };
 
-      batchList.querySelectorAll('.extract-item-cb').forEach((cb) => {
-        cb.addEventListener('change', updateCommitBtn);
-      });
+        cardsList.querySelectorAll('.extract-item-cb').forEach((cb) => {
+          cb.addEventListener('change', updateCommitBtn);
+        });
 
-      selectAllBtn.addEventListener('click', () => {
-        batchList.querySelectorAll('.extract-item-cb').forEach((cb) => (cb.checked = true));
+        selectAllBtn.addEventListener('click', () => {
+          cardsList.querySelectorAll('.extract-item-cb').forEach((cb) => (cb.checked = true));
+          updateCommitBtn();
+        });
+
+        deselectAllBtn.addEventListener('click', () => {
+          cardsList.querySelectorAll('.extract-item-cb').forEach((cb) => (cb.checked = !cb.checked));
+          updateCommitBtn();
+        });
+
         updateCommitBtn();
-      });
 
-      deselectAllBtn.addEventListener('click', () => {
-        batchList.querySelectorAll('.extract-item-cb').forEach((cb) => (cb.checked = !cb.checked));
-        updateCommitBtn();
-      });
+        commitBtn.addEventListener('click', async () => {
+          const selectedDrafts = [];
+          const cardEls = cardsList.querySelectorAll('.extract-item-card');
+          cardEls.forEach((card) => {
+            const cb = card.querySelector('.extract-item-cb');
+            if (!cb.checked) return;
+            const idx = parseInt(card.dataset.index, 10);
+            const orig = drafts[idx];
+            const kind = card.querySelector('.draft-kind').value;
+            const status = card.querySelector('.draft-status').value;
+            const text = card.querySelector('.draft-text').value.trim();
+            if (!text) return;
+            selectedDrafts.push({
+              ...orig,
+              kind,
+              status,
+              text,
+            });
+          });
 
-      updateCommitBtn();
+          if (selectedDrafts.length === 0) return;
 
-      commitBtn.addEventListener('click', async () => {
-        const docMap = new Map();
-        const cardEls = batchList.querySelectorAll('.extract-item-card');
-        cardEls.forEach((card) => {
-          const cb = card.querySelector('.extract-item-cb');
-          if (!cb.checked) return;
-          const docId = card.dataset.docId;
-          const idx = parseInt(card.dataset.index, 10);
-          const docRes = results.find((r) => r.documentId === docId);
-          if (!docRes) return;
-          const orig = docRes.items[idx];
-          const kind = card.querySelector('.draft-kind').value;
-          const status = card.querySelector('.draft-status').value;
-          const text = card.querySelector('.draft-text').value.trim();
-          if (!text) return;
-          if (!docMap.has(docId)) {
-            docMap.set(docId, []);
+          commitBtn.disabled = true;
+          commitBtn.textContent = '入库中…';
+          try {
+            const res = await this.fetchApi(`/documents/${doc.id}/extract/commit`, {
+              method: 'POST',
+              body: { items: selectedDrafts },
+            });
+            closeModal();
+            alert(`提炼完成！成功沉淀 ${res.length} 条工程知识。`);
+            await this.loadItems();
+            await this.loadDocuments();
+          } catch (err) {
+            alert('提炼知识入库失败: ' + err.message);
+            commitBtn.disabled = false;
+            updateCommitBtn();
           }
-          docMap.get(docId).push({
-            ...orig,
-            kind,
-            status,
-            text,
+        });
+      } catch (err) {
+        bodyContainer.innerHTML = `<div class="table-error">提炼预览失败: ${escapeHtml(err.message)}</div>`;
+      }
+    });
+  }
+
+  async showBatchExtractDialog() {
+    const html = `
+      <dialog id="kn-modal-extract-review" class="kn-modal kn-modal-wide">
+        <div class="dialog-heading">
+          <div class="dialog-title-group">
+            <span class="dialog-badge">批量知识提炼</span>
+            <h2>工作区文档批量提炼与沉淀</h2>
+          </div>
+          <button class="icon-button btn-close-modal" type="button">✕</button>
+        </div>
+        <div class="extract-review-banner">
+          <span>💡 扫描工作区工程文档并提炼规则，确认后批量持久化并关联代码图谱。</span>
+          <div class="extract-batch-actions">
+            <button type="button" class="mini-text-btn btn-select-all">全选</button>
+            <button type="button" class="mini-text-btn btn-deselect-all">反选</button>
+          </div>
+        </div>
+        <div class="extract-body-container">
+          <div class="loading-spinner">正在扫描工作区所有技术文档…</div>
+        </div>
+        <div class="form-actions" style="margin-top: 16px;">
+          <button type="button" class="ghost-btn btn-close-modal">取消</button>
+          <button type="button" id="kn-btn-commit-batch-extract" class="send-button" disabled>确认批量入库 (0 条)</button>
+        </div>
+      </dialog>
+    `;
+
+    this.openModal(html, async (dialog, closeModal) => {
+      const bodyContainer = dialog.querySelector('.extract-body-container');
+      const commitBtn = dialog.querySelector('#kn-btn-commit-batch-extract');
+      const selectAllBtn = dialog.querySelector('.btn-select-all');
+      const deselectAllBtn = dialog.querySelector('.btn-deselect-all');
+
+      try {
+        const results = await this.fetchApi('/extract-docs/preview', {
+          method: 'POST',
+          body: { libraryId: this.currentLibraryId || undefined },
+        });
+
+        const totalItems = (results || []).reduce((sum, r) => sum + (r.items ? r.items.length : 0), 0);
+
+        if (!results || results.length === 0 || totalItems === 0) {
+          bodyContainer.innerHTML = '<div class="table-empty">当前知识库文档中未检测到符合条件的知识条目。</div>';
+          return;
+        }
+
+        bodyContainer.innerHTML = `
+          <div class="extract-items-list" id="kn-extract-batch-list"></div>
+        `;
+        const batchList = bodyContainer.querySelector('#kn-extract-batch-list');
+
+        results.forEach((docRes) => {
+          if (!docRes.items || docRes.items.length === 0) return;
+
+          const groupHeader = document.createElement('div');
+          groupHeader.className = 'draft-group-header';
+          groupHeader.innerHTML = `📄 <strong>${escapeHtml(docRes.sourceKey)}</strong> <span style="font-size: 11px; color: var(--text-muted); font-weight: normal;">(${docRes.items.length} 条)</span>`;
+          batchList.appendChild(groupHeader);
+
+          docRes.items.forEach((draft, idx) => {
+            const card = document.createElement('div');
+            card.className = 'extract-item-card';
+            card.dataset.docId = docRes.documentId;
+            card.dataset.index = idx;
+
+            const entityBadges = (draft.matchedEntityNames || [])
+              .map((name) => `<span class="entity-badge">🏷️ ${escapeHtml(name)}</span>`)
+              .join('');
+
+            card.innerHTML = `
+              <input type="checkbox" class="extract-item-cb" checked />
+              <div class="extract-item-main">
+                <div class="extract-item-controls">
+                  <select class="kn-mini-select draft-kind">
+                    <option value="decision" ${draft.kind === 'decision' ? 'selected' : ''}>架构决策 (decision)</option>
+                    <option value="observation" ${draft.kind === 'observation' ? 'selected' : ''}>规则约束 (observation)</option>
+                    <option value="experience" ${draft.kind === 'experience' ? 'selected' : ''}>候选建议 (experience)</option>
+                  </select>
+                  <select class="kn-mini-select draft-status">
+                    <option value="candidate" ${draft.status === 'candidate' ? 'selected' : ''}>候选待验证 (candidate)</option>
+                    <option value="effective" ${draft.status === 'effective' ? 'selected' : ''}>正式生效 (effective)</option>
+                  </select>
+                  <span class="extract-line-tag">行 ${draft.startLine}</span>
+                </div>
+                <textarea class="extract-item-textarea draft-text" rows="2">${escapeHtml(draft.text)}</textarea>
+                <div class="extract-item-meta">
+                  <div class="extract-snippet"><strong>原文:</strong> <code>${escapeHtml(draft.sourceSnippet || '')}</code></div>
+                  ${entityBadges ? `<div class="extract-entities"><strong>关联代码实体:</strong> ${entityBadges}</div>` : ''}
+                </div>
+              </div>
+            `;
+            batchList.appendChild(card);
           });
         });
 
-        if (docMap.size === 0) return;
+        const updateCommitBtn = () => {
+          const checkedCount = batchList.querySelectorAll('.extract-item-cb:checked').length;
+          commitBtn.textContent = `确认批量入库 (${checkedCount} 条)`;
+          commitBtn.disabled = checkedCount === 0;
+        };
 
-        commitBtn.disabled = true;
-        commitBtn.textContent = '批量入库中…';
-        let totalCommitted = 0;
-        try {
-          for (const [docId, items] of docMap.entries()) {
-            const committed = await this.fetchApi(`/documents/${docId}/extract/commit`, {
-              method: 'POST',
-              body: { items },
-            });
-            totalCommitted += committed.length;
-          }
-          dialog.close();
-          alert(`批量提炼完成！成功沉淀 ${totalCommitted} 条工程知识。`);
-          await this.loadItems();
-          await this.loadDocuments();
-        } catch (err) {
-          alert('批量入库过程中发生错误: ' + err.message);
-          commitBtn.disabled = false;
+        batchList.querySelectorAll('.extract-item-cb').forEach((cb) => {
+          cb.addEventListener('change', updateCommitBtn);
+        });
+
+        selectAllBtn.addEventListener('click', () => {
+          batchList.querySelectorAll('.extract-item-cb').forEach((cb) => (cb.checked = true));
           updateCommitBtn();
-        }
-      });
-    } catch (err) {
-      bodyContainer.innerHTML = `<div class="table-error">批量提炼扫描失败: ${escapeHtml(err.message)}</div>`;
-    }
+        });
+
+        deselectAllBtn.addEventListener('click', () => {
+          batchList.querySelectorAll('.extract-item-cb').forEach((cb) => (cb.checked = !cb.checked));
+          updateCommitBtn();
+        });
+
+        updateCommitBtn();
+
+        commitBtn.addEventListener('click', async () => {
+          const docMap = new Map();
+          const cardEls = batchList.querySelectorAll('.extract-item-card');
+          cardEls.forEach((card) => {
+            const cb = card.querySelector('.extract-item-cb');
+            if (!cb.checked) return;
+            const docId = card.dataset.docId;
+            const idx = parseInt(card.dataset.index, 10);
+            const docRes = results.find((r) => r.documentId === docId);
+            if (!docRes) return;
+            const orig = docRes.items[idx];
+            const kind = card.querySelector('.draft-kind').value;
+            const status = card.querySelector('.draft-status').value;
+            const text = card.querySelector('.draft-text').value.trim();
+            if (!text) return;
+            if (!docMap.has(docId)) {
+              docMap.set(docId, []);
+            }
+            docMap.get(docId).push({
+              ...orig,
+              kind,
+              status,
+              text,
+            });
+          });
+
+          if (docMap.size === 0) return;
+
+          commitBtn.disabled = true;
+          commitBtn.textContent = '批量入库中…';
+          let totalCommitted = 0;
+          try {
+            for (const [docId, items] of docMap.entries()) {
+              const committed = await this.fetchApi(`/documents/${docId}/extract/commit`, {
+                method: 'POST',
+                body: { items },
+              });
+              totalCommitted += committed.length;
+            }
+            closeModal();
+            alert(`批量提炼完成！成功沉淀 ${totalCommitted} 条工程知识。`);
+            await this.loadItems();
+            await this.loadDocuments();
+          } catch (err) {
+            alert('批量入库过程中发生错误: ' + err.message);
+            commitBtn.disabled = false;
+            updateCommitBtn();
+          }
+        });
+      } catch (err) {
+        bodyContainer.innerHTML = `<div class="table-error">批量提炼扫描失败: ${escapeHtml(err.message)}</div>`;
+      }
+    });
   }
 }

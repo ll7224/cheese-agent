@@ -552,15 +552,69 @@ export class KnowledgeService {
   ): Promise<Array<{ documentId: string; sourceKey: string; items: ExtractedDocItemDraft[] }>> {
     const targetLibId = libraryId || `project:${ctx.workspaceId}`;
     const allLibs = this.store.listLibraries();
-    const accessibleIds = resolveLibraries(allLibs, ctx);
+    const accessibleIds = allLibs
+      .filter((l) => (l.scope === 'project' && l.workspaceId === ctx.workspaceId) || l.scope === 'public')
+      .map((l) => l.id);
     if (!accessibleIds.includes(targetLibId)) {
       throw new Error(`Access denied to library: ${targetLibId}`);
     }
 
-    const docs = this.store.listDocumentsPaged({
+    let docs = this.store.listDocumentsPaged({
       libraryId: targetLibId,
       limit: 100,
     });
+
+    // 冷启动自愈：如果当前项目库中尚未同步任何文档，但工作区磁盘上存在 docs 目录或 Markdown 文件，自动触发首次发现与同步
+    if (docs.length === 0 && targetLibId === `project:${ctx.workspaceId}`) {
+      const realRoot =
+        ctx.workspacePath && fs.existsSync(ctx.workspacePath)
+          ? fs.realpathSync(ctx.workspacePath)
+          : null;
+      if (realRoot) {
+        const docsDir = path.join(realRoot, 'docs');
+        if (fs.existsSync(docsDir) && fs.lstatSync(docsDir).isDirectory()) {
+          let docsSource = this.store.getSource('src-local-docs');
+          if (!docsSource) {
+            docsSource = this.store.createSource({
+              id: 'src-local-docs',
+              libraryId: targetLibId,
+              kind: 'local',
+              locator: 'docs',
+              enabled: true,
+              syncStatus: 'ready',
+            });
+          } else if (!docsSource.enabled) {
+            this.store.updateSource(docsSource.id, { enabled: true });
+            docsSource.enabled = true;
+          }
+          await this.localSync.syncSource(docsSource, realRoot);
+        }
+
+        const readmeFile = path.join(realRoot, 'README.md');
+        if (fs.existsSync(readmeFile) && fs.lstatSync(readmeFile).isFile()) {
+          let readmeSource = this.store.getSource('src-local-README_md');
+          if (!readmeSource) {
+            readmeSource = this.store.createSource({
+              id: 'src-local-README_md',
+              libraryId: targetLibId,
+              kind: 'local',
+              locator: 'README.md',
+              enabled: true,
+              syncStatus: 'ready',
+            });
+          } else if (!readmeSource.enabled) {
+            this.store.updateSource(readmeSource.id, { enabled: true });
+            readmeSource.enabled = true;
+          }
+          await this.localSync.syncSource(readmeSource, realRoot);
+        }
+
+        docs = this.store.listDocumentsPaged({
+          libraryId: targetLibId,
+          limit: 100,
+        });
+      }
+    }
 
     const results: Array<{ documentId: string; sourceKey: string; items: ExtractedDocItemDraft[] }> = [];
     for (const doc of docs) {
