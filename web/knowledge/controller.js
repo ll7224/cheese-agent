@@ -911,51 +911,6 @@ export class KnowledgeController {
     });
   }
 
-    const listBody = root.querySelector('.revisions-list-body');
-    try {
-      const revs = await this.fetchApi(`/documents/${doc.id}/revisions`);
-      if (!revs || revs.length === 0) {
-        listBody.innerHTML = '<div class="table-empty">无版本历史记录</div>';
-        return;
-      }
-
-      listBody.innerHTML = `
-        <table class="kn-table">
-          <thead>
-            <tr>
-              <th>版本 ID</th>
-              <th>SHA-256 Hash</th>
-              <th>Git 提交</th>
-              <th>发布时间</th>
-              <th>状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${revs
-              .map((r) => {
-                const isCurrent = r.id === doc.activeRevisionId;
-                const statusTag = isCurrent
-                  ? '<span class="status-badge-current">● 当前生效</span>'
-                  : '<span class="status-badge-historic">历史</span>';
-                return `
-                <tr>
-                  <td><code>${escapeHtml(r.id)}</code></td>
-                  <td><code class="hash-tag">${escapeHtml(r.hash.slice(0, 10))}</code></td>
-                  <td><code>${escapeHtml(r.commitHash ? r.commitHash.slice(0, 8) : '-')}</code></td>
-                  <td>${escapeHtml(new Date(r.createdAt).toLocaleString())}</td>
-                  <td>${statusTag}</td>
-                </tr>
-              `;
-              })
-              .join('')}
-          </tbody>
-        </table>
-      `;
-    } catch (err) {
-      listBody.innerHTML = `<div class="table-error">获取版本失败: ${escapeHtml(err.message)}</div>`;
-    }
-  }
-
   async loadProviderStatus() {
     try {
       const status = await this.fetchApi('/providers');
