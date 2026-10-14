@@ -297,8 +297,9 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     const { ctx } = getContext(context.req.param('id'));
     const libraryId = context.req.query('libraryId');
     const sourceId = context.req.query('sourceId');
-    const limit = Math.min(Math.max(Number(context.req.query('limit') || 50), 1), 100);
+    const limit = Math.min(Math.max(Number(context.req.query('limit') || 20), 1), 100);
     const offset = Math.max(Number(context.req.query('offset') || 0), 0);
+    const format = context.req.query('format');
 
     const accessibleIds = getManageableLibraryIds(ctx);
 
@@ -314,6 +315,21 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     });
 
     const filtered = docs.filter((d) => accessibleIds.includes(d.libraryId));
+    const total = runtime.knowledgeService.store.countDocuments({
+      libraryId,
+      sourceId,
+    });
+    context.header('X-Total-Count', String(total));
+
+    if (format === 'paged') {
+      return context.json({
+        items: filtered,
+        total,
+        limit,
+        offset,
+      });
+    }
+
     return context.json(filtered);
   });
 
@@ -601,7 +617,29 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
   routes.get('/api/v1/workspaces/:id/knowledge/items', (context) => {
     const { ctx } = getContext(context.req.param('id'));
     const status = context.req.query('status') as any;
-    const items = runtime.knowledgeService.listItems(ctx, status || undefined);
+    const limit = context.req.query('limit') ? Number(context.req.query('limit')) : undefined;
+    const offset = context.req.query('offset') ? Number(context.req.query('offset')) : undefined;
+    const format = context.req.query('format');
+
+    const total = runtime.knowledgeService.countItems(ctx, status || undefined);
+    context.header('X-Total-Count', String(total));
+
+    if (format === 'paged') {
+      const items = runtime.knowledgeService.listItems(
+        ctx,
+        status || undefined,
+        limit ? Math.min(Math.max(limit, 1), 100) : 20,
+        offset ? Math.max(offset, 0) : 0
+      );
+      return context.json({
+        items,
+        total,
+        limit: limit || 20,
+        offset: offset || 0,
+      });
+    }
+
+    const items = runtime.knowledgeService.listItems(ctx, status || undefined, limit, offset);
     return context.json(items);
   });
 

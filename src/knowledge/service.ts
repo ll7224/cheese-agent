@@ -407,9 +407,22 @@ export class KnowledgeService {
   /**
    * 列出当前上下文可访问的沉淀条目
    */
-  listItems(ctx: KnowledgeContext, status?: KnowledgeStatus): KnowledgeItem[] {
+  listItems(ctx: KnowledgeContext, status?: KnowledgeStatus, limit?: number, offset?: number): KnowledgeItem[] {
     const accessibleIds = this.getManageableLibraryIds(ctx);
     return this.store.listKnowledgeItems({
+      libraryIds: accessibleIds,
+      status,
+      limit,
+      offset,
+    });
+  }
+
+  /**
+   * 统计当前上下文可访问的沉淀条目总数
+   */
+  countItems(ctx: KnowledgeContext, status?: KnowledgeStatus): number {
+    const accessibleIds = this.getManageableLibraryIds(ctx);
+    return this.store.countKnowledgeItems({
       libraryIds: accessibleIds,
       status,
     });

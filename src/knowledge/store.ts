@@ -756,6 +756,35 @@ export class KnowledgeStore {
   }
 
   /**
+   * 统计符合条件的文档总数
+   */
+  countDocuments(options: {
+    libraryId?: string;
+    sourceId?: string;
+  } = {}): number {
+    let sql = `
+      SELECT COUNT(*) as cnt
+      FROM documents d
+      JOIN sources s ON s.id = d.source_id
+    `;
+    const params: any[] = [];
+    const where: string[] = [];
+    if (options.sourceId) {
+      where.push('d.source_id = ?');
+      params.push(options.sourceId);
+    }
+    if (options.libraryId) {
+      where.push('s.library_id = ?');
+      params.push(options.libraryId);
+    }
+    if (where.length > 0) {
+      sql += ` WHERE ` + where.join(' AND ');
+    }
+    const row = this.db.prepare(sql).get(...params) as any;
+    return row?.cnt || 0;
+  }
+
+  /**
    * 查询指定实体
    */
   getEntity(id: string): {
@@ -951,6 +980,38 @@ export class KnowledgeStore {
         updatedAt: row.updated_at,
       };
     });
+  }
+
+  /**
+   * 统计符合条件的知识条目总数
+   */
+  countKnowledgeItems(options: {
+    libraryIds?: string[];
+    status?: import('./types.js').KnowledgeStatus;
+    originRunId?: string;
+  } = {}): number {
+    const where: string[] = [];
+    const params: any[] = [];
+
+    if (options.libraryIds && options.libraryIds.length > 0) {
+      where.push(`library_id IN (${options.libraryIds.map(() => '?').join(',')})`);
+      params.push(...options.libraryIds);
+    }
+    if (options.status) {
+      where.push(`status = ?`);
+      params.push(options.status);
+    }
+    if (options.originRunId) {
+      where.push(`origin_run_id = ?`);
+      params.push(options.originRunId);
+    }
+
+    let sql = `SELECT COUNT(*) as cnt FROM knowledge_items`;
+    if (where.length > 0) {
+      sql += ` WHERE ` + where.join(' AND ');
+    }
+    const row = this.db.prepare(sql).get(...params) as any;
+    return row?.cnt || 0;
   }
 
   /**

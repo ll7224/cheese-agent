@@ -29,6 +29,8 @@ const ICONS = {
   refresh: `<svg class="kn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M14 2.5v4h-4"/><path d="M2 13.5v-4h4"/><path d="M13.2 6.5A6 6 0 0 0 3.3 4.5L2 6.5"/><path d="M2.8 9.5a6 6 0 0 0 9.9 2l1.3-2"/></svg>`,
   import: `<svg class="kn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 2v9m0 0-3-3m3 3 3-3"/><path d="M2 11v2.5A1.5 1.5 0 0 0 3.5 15h9a1.5 1.5 0 0 0 1.5-1.5V11"/></svg>`,
   close: `<svg class="kn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><line x1="3.5" y1="3.5" x2="12.5" y2="12.5"/><line x1="12.5" y1="3.5" x2="3.5" y2="12.5"/></svg>`,
+  chevronLeft: `<svg class="kn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><polyline points="10 3 5 8 10 13"/></svg>`,
+  chevronRight: `<svg class="kn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><polyline points="6 3 11 8 6 13"/></svg>`,
 };
 
 export function buildKnowledgeShell() {
@@ -169,10 +171,32 @@ export function buildKnowledgeShell() {
             </tbody>
           </table>
         </div>
-        <div class="kn-pagination">
-          <button id="kn-docs-prev-btn" class="kn-btn kn-btn-secondary kn-btn-sm" type="button">上一页</button>
-          <span id="kn-docs-page-info" class="page-info">第 1 页</span>
-          <button id="kn-docs-next-btn" class="kn-btn kn-btn-secondary kn-btn-sm" type="button">下一页</button>
+        <div class="kn-pagination" id="kn-docs-pagination">
+          <div class="pagination-summary">
+            共 <span id="kn-docs-total-count" class="tabular-num">0</span> 篇文档
+          </div>
+          <div class="pagination-controls">
+            <div class="pagination-size-selector">
+              <span class="pagination-size-label">每页</span>
+              <select id="kn-docs-limit-select" class="kn-mini-select" aria-label="选择文档每页条目数">
+                <option value="10">10</option>
+                <option value="20" selected>20</option>
+                <option value="50">50</option>
+              </select>
+              <span class="pagination-size-label">篇</span>
+            </div>
+            <div class="pagination-nav">
+              <button id="kn-docs-prev-btn" class="kn-btn kn-btn-secondary kn-btn-sm" type="button" aria-label="上一页">
+                ${ICONS.chevronLeft}
+                <span>上一页</span>
+              </button>
+              <span id="kn-docs-page-info" class="page-info">第 1 / 1 页</span>
+              <button id="kn-docs-next-btn" class="kn-btn kn-btn-secondary kn-btn-sm" type="button" aria-label="下一页">
+                <span>下一页</span>
+                ${ICONS.chevronRight}
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -209,6 +233,33 @@ export function buildKnowledgeShell() {
               <tr><td colspan="6" class="table-empty">加载中…</td></tr>
             </tbody>
           </table>
+        </div>
+        <div class="kn-pagination" id="kn-sources-pagination">
+          <div class="pagination-summary">
+            共 <span id="kn-sources-total-count" class="tabular-num">0</span> 个来源
+          </div>
+          <div class="pagination-controls">
+            <div class="pagination-size-selector">
+              <span class="pagination-size-label">每页</span>
+              <select id="kn-sources-limit-select" class="kn-mini-select" aria-label="选择来源每页条目数">
+                <option value="10" selected>10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+              </select>
+              <span class="pagination-size-label">个</span>
+            </div>
+            <div class="pagination-nav">
+              <button id="kn-sources-prev-btn" class="kn-btn kn-btn-secondary kn-btn-sm" type="button" aria-label="上一页">
+                ${ICONS.chevronLeft}
+                <span>上一页</span>
+              </button>
+              <span id="kn-sources-page-info" class="page-info">第 1 / 1 页</span>
+              <button id="kn-sources-next-btn" class="kn-btn kn-btn-secondary kn-btn-sm" type="button" aria-label="下一页">
+                <span>下一页</span>
+                ${ICONS.chevronRight}
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Providers Status Card -->
@@ -291,6 +342,33 @@ export function buildKnowledgeShell() {
               <tr><td colspan="5" class="table-empty">加载中…</td></tr>
             </tbody>
           </table>
+        </div>
+        <div class="kn-pagination" id="kn-items-pagination">
+          <div class="pagination-summary">
+            共 <span id="kn-items-total-count" class="tabular-num">0</span> 条沉淀
+          </div>
+          <div class="pagination-controls">
+            <div class="pagination-size-selector">
+              <span class="pagination-size-label">每页</span>
+              <select id="kn-items-limit-select" class="kn-mini-select" aria-label="选择沉淀每页条目数">
+                <option value="10">10</option>
+                <option value="20" selected>20</option>
+                <option value="50">50</option>
+              </select>
+              <span class="pagination-size-label">条</span>
+            </div>
+            <div class="pagination-nav">
+              <button id="kn-items-prev-btn" class="kn-btn kn-btn-secondary kn-btn-sm" type="button" aria-label="上一页">
+                ${ICONS.chevronLeft}
+                <span>上一页</span>
+              </button>
+              <span id="kn-items-page-info" class="page-info">第 1 / 1 页</span>
+              <button id="kn-items-next-btn" class="kn-btn kn-btn-secondary kn-btn-sm" type="button" aria-label="下一页">
+                <span>下一页</span>
+                ${ICONS.chevronRight}
+              </button>
+            </div>
+          </div>
         </div>
       </section>
     </main>

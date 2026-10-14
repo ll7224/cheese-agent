@@ -699,17 +699,69 @@
 
 .kn-pagination {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   font-size: 12px;
-  padding-top: 4px;
+  padding: 12px 4px 6px 4px;
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  flex-wrap: wrap;
 }
 
-.page-info {
+.pagination-summary {
+  color: var(--text-muted);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pagination-summary .tabular-num {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pagination-size-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.pagination-size-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.pagination-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pagination-nav .page-info {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
   font-weight: 500;
+  padding: 0 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.pagination-nav button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* --------------------------------------------------------------------------

@@ -35,12 +35,23 @@ export class KnowledgeController {
 
     this.libraries = [];
     this.currentLibraryId = '';
+
     this.documents = [];
     this.docPage = 0;
-    this.docLimit = 50;
-    this.sources = [];
-    this.discoveries = [];
+    this.docLimit = 20;
+    this.docTotal = 0;
 
+    this.sources = [];
+    this.sourcePage = 0;
+    this.sourceLimit = 10;
+    this.sourceTotal = 0;
+
+    this.items = [];
+    this.itemPage = 0;
+    this.itemLimit = 20;
+    this.itemTotal = 0;
+
+    this.discoveries = [];
     this.container = null;
   }
 
@@ -62,9 +73,12 @@ export class KnowledgeController {
     c.querySelector('#kn-lib-select').addEventListener('change', (e) => {
       this.currentLibraryId = e.target.value;
       this.docPage = 0;
+      this.sourcePage = 0;
+      this.itemPage = 0;
       this.updateScopeBadge();
       this.loadDocuments();
       this.loadSources();
+      this.loadItems();
     });
 
     // 绑定工作区按钮
@@ -121,24 +135,66 @@ export class KnowledgeController {
       c.querySelector('#kn-search-results').hidden = true;
     });
 
-    // 导入文档
+    // 文档列表与分页
     c.querySelector('#kn-import-doc-btn').addEventListener('click', () => {
       this.showImportDocumentDialog();
     });
+    const docsPrevBtn = c.querySelector('#kn-docs-prev-btn');
+    if (docsPrevBtn) {
+      docsPrevBtn.addEventListener('click', () => {
+        if (this.docPage > 0) {
+          this.docPage--;
+          this.loadDocuments();
+        }
+      });
+    }
+    const docsNextBtn = c.querySelector('#kn-docs-next-btn');
+    if (docsNextBtn) {
+      docsNextBtn.addEventListener('click', () => {
+        const totalPages = Math.max(1, Math.ceil(this.docTotal / this.docLimit));
+        if (this.docPage + 1 < totalPages) {
+          this.docPage++;
+          this.loadDocuments();
+        }
+      });
+    }
+    const docsLimitSelect = c.querySelector('#kn-docs-limit-select');
+    if (docsLimitSelect) {
+      docsLimitSelect.addEventListener('change', (e) => {
+        this.docLimit = Number(e.target.value) || 20;
+        this.docPage = 0;
+        this.loadDocuments();
+      });
+    }
 
-    // 分页
-    c.querySelector('#kn-docs-prev-btn').addEventListener('click', () => {
-      if (this.docPage > 0) {
-        this.docPage--;
-        this.loadDocuments();
-      }
-    });
-    c.querySelector('#kn-docs-next-btn').addEventListener('click', () => {
-      if (this.documents.length === this.docLimit) {
-        this.docPage++;
-        this.loadDocuments();
-      }
-    });
+    // 来源列表分页
+    const srcPrevBtn = c.querySelector('#kn-sources-prev-btn');
+    if (srcPrevBtn) {
+      srcPrevBtn.addEventListener('click', () => {
+        if (this.sourcePage > 0) {
+          this.sourcePage--;
+          this.renderSourcesPage();
+        }
+      });
+    }
+    const srcNextBtn = c.querySelector('#kn-sources-next-btn');
+    if (srcNextBtn) {
+      srcNextBtn.addEventListener('click', () => {
+        const totalPages = Math.max(1, Math.ceil(this.sources.length / this.sourceLimit));
+        if (this.sourcePage + 1 < totalPages) {
+          this.sourcePage++;
+          this.renderSourcesPage();
+        }
+      });
+    }
+    const srcLimitSelect = c.querySelector('#kn-sources-limit-select');
+    if (srcLimitSelect) {
+      srcLimitSelect.addEventListener('change', (e) => {
+        this.sourceLimit = Number(e.target.value) || 10;
+        this.sourcePage = 0;
+        this.renderSourcesPage();
+      });
+    }
 
     // 添加来源
     c.querySelector('#kn-add-source-btn').addEventListener('click', () => {
@@ -209,14 +265,44 @@ export class KnowledgeController {
       });
     }
 
-    // 沉淀与经验
+    // 沉淀与经验分页与筛选
     const filterStatus = c.querySelector('#kn-items-filter-status');
     if (filterStatus) {
-      filterStatus.addEventListener('change', () => this.loadItems());
+      filterStatus.addEventListener('change', () => {
+        this.itemPage = 0;
+        this.loadItems();
+      });
     }
     const refreshItemsBtn = c.querySelector('#kn-refresh-items-btn');
     if (refreshItemsBtn) {
       refreshItemsBtn.addEventListener('click', () => this.loadItems());
+    }
+    const itemsPrevBtn = c.querySelector('#kn-items-prev-btn');
+    if (itemsPrevBtn) {
+      itemsPrevBtn.addEventListener('click', () => {
+        if (this.itemPage > 0) {
+          this.itemPage--;
+          this.loadItems();
+        }
+      });
+    }
+    const itemsNextBtn = c.querySelector('#kn-items-next-btn');
+    if (itemsNextBtn) {
+      itemsNextBtn.addEventListener('click', () => {
+        const totalPages = Math.max(1, Math.ceil(this.itemTotal / this.itemLimit));
+        if (this.itemPage + 1 < totalPages) {
+          this.itemPage++;
+          this.loadItems();
+        }
+      });
+    }
+    const itemsLimitSelect = c.querySelector('#kn-items-limit-select');
+    if (itemsLimitSelect) {
+      itemsLimitSelect.addEventListener('change', (e) => {
+        this.itemLimit = Number(e.target.value) || 20;
+        this.itemPage = 0;
+        this.loadItems();
+      });
     }
   }
 
@@ -337,17 +423,30 @@ export class KnowledgeController {
 
     try {
       const offset = this.docPage * this.docLimit;
-      const docs = await this.fetchApi(
-        `/documents?libraryId=${encodeURIComponent(this.currentLibraryId)}&limit=${this.docLimit}&offset=${offset}`
+      const res = await this.fetchApi(
+        `/documents?libraryId=${encodeURIComponent(this.currentLibraryId)}&limit=${this.docLimit}&offset=${offset}&format=paged`
       );
+      const docs = Array.isArray(res) ? res : (res.items || []);
+      const total = typeof res.total === 'number' ? res.total : docs.length;
       this.documents = docs;
+      this.docTotal = total;
 
-      this.container.querySelector('#kn-docs-count').textContent = `当前库共显示 ${docs.length} 篇文档`;
-      this.container.querySelector('#kn-docs-page-info').textContent = `第 ${this.docPage + 1} 页`;
-      this.container.querySelector('#kn-docs-prev-btn').disabled = this.docPage === 0;
-      this.container.querySelector('#kn-docs-next-btn').disabled = docs.length < this.docLimit;
+      const totalPages = Math.max(1, Math.ceil(total / this.docLimit));
+      const currentPage = Math.min(this.docPage + 1, totalPages);
 
-      if (docs.length === 0) {
+      const countEl = this.container.querySelector('#kn-docs-count');
+      const totalEl = this.container.querySelector('#kn-docs-total-count');
+      const pageInfo = this.container.querySelector('#kn-docs-page-info');
+      const prevBtn = this.container.querySelector('#kn-docs-prev-btn');
+      const nextBtn = this.container.querySelector('#kn-docs-next-btn');
+
+      if (countEl) countEl.textContent = `共 ${total} 篇文档`;
+      if (totalEl) totalEl.textContent = total;
+      if (pageInfo) pageInfo.textContent = `第 ${currentPage} / ${totalPages} 页`;
+      if (prevBtn) prevBtn.disabled = this.docPage === 0;
+      if (nextBtn) nextBtn.disabled = this.docPage >= totalPages - 1;
+
+      if (total === 0) {
         tbody.innerHTML = `
           <tr>
             <td colspan="6" class="table-empty">
@@ -384,6 +483,12 @@ export class KnowledgeController {
             }
           });
         }
+        return;
+      }
+
+      if (docs.length === 0 && this.docPage > 0) {
+        this.docPage = Math.max(0, totalPages - 1);
+        await this.loadDocuments();
         return;
       }
 
@@ -427,65 +532,92 @@ export class KnowledgeController {
       const sources = await this.fetchApi(
         `/sources?libraryId=${encodeURIComponent(this.currentLibraryId)}`
       );
-      this.sources = sources;
-
-      if (sources.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="table-empty">当前知识库暂无来源</td></tr>';
-        return;
-      }
-
-      tbody.innerHTML = '';
-      sources.forEach((s) => {
-        const tr = document.createElement('tr');
-        const lastSync = s.lastSyncAt ? new Date(s.lastSyncAt).toLocaleString() : '未同步';
-        tr.innerHTML = `
-          <td><span class="kind-tag">${escapeHtml(s.kind)}</span></td>
-          <td><code>${escapeHtml(s.locator)}</code></td>
-          <td>
-            <input type="checkbox" class="source-enabled-cb" ${s.enabled ? 'checked' : ''} />
-          </td>
-          <td><span class="sync-status sync-${s.syncStatus}">${escapeHtml(s.syncStatus)}</span></td>
-          <td>${escapeHtml(lastSync)}</td>
-          <td class="action-cell">
-            <button class="mini-btn btn-sync" type="button">立即同步</button>
-          </td>
-        `;
-
-        const cb = tr.querySelector('.source-enabled-cb');
-        cb.addEventListener('change', async () => {
-          try {
-            await this.fetchApi(`/sources/${s.id}`, {
-              method: 'PATCH',
-              body: { enabled: cb.checked },
-            });
-            await this.loadSources();
-          } catch (err) {
-            alert('切换来源状态失败: ' + err.message);
-            cb.checked = !cb.checked;
-          }
-        });
-
-        tr.querySelector('.btn-sync').addEventListener('click', async (e) => {
-          const btn = e.target;
-          btn.disabled = true;
-          btn.textContent = '同步中…';
-          try {
-            await this.fetchApi(`/sources/${s.id}/sync`, { method: 'POST', body: {} });
-            await this.loadSources();
-            await this.loadDocuments();
-          } catch (err) {
-            alert('同步失败: ' + err.message);
-          } finally {
-            btn.disabled = false;
-            btn.textContent = '立即同步';
-          }
-        });
-
-        tbody.appendChild(tr);
-      });
+      this.sources = Array.isArray(sources) ? sources : [];
+      this.sourceTotal = this.sources.length;
+      this.renderSourcesPage();
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="6" class="table-error">加载来源失败: ${escapeHtml(err.message)}</td></tr>`;
     }
+  }
+
+  renderSourcesPage() {
+    const tbody = this.container.querySelector('#kn-sources-tbody');
+    const countEl = this.container.querySelector('#kn-sources-count');
+    const totalEl = this.container.querySelector('#kn-sources-total-count');
+    const pageInfo = this.container.querySelector('#kn-sources-page-info');
+    const prevBtn = this.container.querySelector('#kn-sources-prev-btn');
+    const nextBtn = this.container.querySelector('#kn-sources-next-btn');
+
+    const total = this.sources.length;
+    const totalPages = Math.max(1, Math.ceil(total / this.sourceLimit));
+    if (this.sourcePage >= totalPages) {
+      this.sourcePage = Math.max(0, totalPages - 1);
+    }
+    const currentPage = Math.min(this.sourcePage + 1, totalPages);
+
+    if (countEl) countEl.textContent = `已配置 ${total} 个来源`;
+    if (totalEl) totalEl.textContent = total;
+    if (pageInfo) pageInfo.textContent = `第 ${currentPage} / ${totalPages} 页`;
+    if (prevBtn) prevBtn.disabled = this.sourcePage === 0;
+    if (nextBtn) nextBtn.disabled = this.sourcePage >= totalPages - 1;
+
+    if (total === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="table-empty">当前知识库暂无来源</td></tr>';
+      return;
+    }
+
+    const start = this.sourcePage * this.sourceLimit;
+    const pageSources = this.sources.slice(start, start + this.sourceLimit);
+
+    tbody.innerHTML = '';
+    pageSources.forEach((s) => {
+      const tr = document.createElement('tr');
+      const lastSync = s.lastSyncAt ? new Date(s.lastSyncAt).toLocaleString() : '未同步';
+      tr.innerHTML = `
+        <td><span class="kind-tag">${escapeHtml(s.kind)}</span></td>
+        <td><code>${escapeHtml(s.locator)}</code></td>
+        <td>
+          <input type="checkbox" class="source-enabled-cb" ${s.enabled ? 'checked' : ''} />
+        </td>
+        <td><span class="sync-status sync-${s.syncStatus}">${escapeHtml(s.syncStatus)}</span></td>
+        <td>${escapeHtml(lastSync)}</td>
+        <td class="action-cell">
+          <button class="mini-btn btn-sync" type="button">立即同步</button>
+        </td>
+      `;
+
+      const cb = tr.querySelector('.source-enabled-cb');
+      cb.addEventListener('change', async () => {
+        try {
+          await this.fetchApi(`/sources/${s.id}`, {
+            method: 'PATCH',
+            body: { enabled: cb.checked },
+          });
+          await this.loadSources();
+        } catch (err) {
+          alert('切换来源状态失败: ' + err.message);
+          cb.checked = !cb.checked;
+        }
+      });
+
+      tr.querySelector('.btn-sync').addEventListener('click', async (e) => {
+        const btn = e.target;
+        btn.disabled = true;
+        btn.textContent = '同步中…';
+        try {
+          await this.fetchApi(`/sources/${s.id}/sync`, { method: 'POST', body: {} });
+          await this.loadSources();
+          await this.loadDocuments();
+        } catch (err) {
+          alert('同步失败: ' + err.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '立即同步';
+        }
+      });
+
+      tbody.appendChild(tr);
+    });
   }
 
   async loadDiscoveries() {
@@ -1251,6 +1383,10 @@ export class KnowledgeController {
   async loadItems() {
     const tbody = this.container.querySelector('#kn-items-tbody');
     const countEl = this.container.querySelector('#kn-items-count');
+    const totalEl = this.container.querySelector('#kn-items-total-count');
+    const pageInfo = this.container.querySelector('#kn-items-page-info');
+    const prevBtn = this.container.querySelector('#kn-items-prev-btn');
+    const nextBtn = this.container.querySelector('#kn-items-next-btn');
     const filterSelect = this.container.querySelector('#kn-items-filter-status');
     if (!tbody) return;
 
@@ -1258,13 +1394,37 @@ export class KnowledgeController {
 
     try {
       const status = filterSelect ? filterSelect.value : '';
-      const query = status ? `?status=${encodeURIComponent(status)}` : '';
-      const items = await this.fetchApi(`/items${query}`);
+      const offset = this.itemPage * this.itemLimit;
+      const queryParams = new URLSearchParams();
+      if (status) queryParams.set('status', status);
+      queryParams.set('limit', String(this.itemLimit));
+      queryParams.set('offset', String(offset));
+      queryParams.set('format', 'paged');
 
-      if (countEl) countEl.textContent = `共 ${items.length} 条沉淀`;
+      const res = await this.fetchApi(`/items?${queryParams.toString()}`);
+      const items = Array.isArray(res) ? res : (res.items || []);
+      const total = typeof res.total === 'number' ? res.total : items.length;
 
-      if (items.length === 0) {
+      this.items = items;
+      this.itemTotal = total;
+
+      const totalPages = Math.max(1, Math.ceil(total / this.itemLimit));
+      const currentPage = Math.min(this.itemPage + 1, totalPages);
+
+      if (countEl) countEl.textContent = `共 ${total} 条沉淀`;
+      if (totalEl) totalEl.textContent = total;
+      if (pageInfo) pageInfo.textContent = `第 ${currentPage} / ${totalPages} 页`;
+      if (prevBtn) prevBtn.disabled = this.itemPage === 0;
+      if (nextBtn) nextBtn.disabled = this.itemPage >= totalPages - 1;
+
+      if (total === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="table-empty">暂无沉淀条目</td></tr>';
+        return;
+      }
+
+      if (items.length === 0 && this.itemPage > 0) {
+        this.itemPage = Math.max(0, totalPages - 1);
+        await this.loadItems();
         return;
       }
 
@@ -1279,7 +1439,7 @@ export class KnowledgeController {
           <td>${statusBadge}</td>
           <td>
             <div class="item-text">${escapeHtml(item.text)}</div>
-            ${item.supersedes ? `<div class="item-supersedes" style="font-size: 11px; color: var(--text-muted, #888); margin-top: 4px;">替代旧条目: <code>${escapeHtml(item.supersedes)}</code></div>` : ''}
+            ${item.supersedes ? `<div class="item-supersedes" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">替代旧条目: <code>${escapeHtml(item.supersedes)}</code></div>` : ''}
           </td>
           <td><code>${escapeHtml(item.applicability || '-')}</code></td>
           <td>

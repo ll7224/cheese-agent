@@ -821,3 +821,92 @@ test('P3-Scenario 13: 知识库彻底删除与级联清理、已删除墓碑隔�
   assert.ok(store.getLibrary(projectLibId), '显式重新创建成功');
 });
 
+test('P3-Scenario 14: 列表分页支持与统计总数测试 (Pagination and Total Counts)', async (t) => {
+  const env = createKnowledgeTestEnv(t);
+  const store = env.store;
+  const service = new KnowledgeService({
+    dataDir: env.tempDir,
+    store,
+  });
+
+  const ctx: KnowledgeContext = {
+    workspaceId: 'ws-page',
+    workspacePath: env.tempDir,
+    agentId: 'general',
+    role: 'owner',
+  };
+  service.attachWorkspace(ctx);
+
+  const libId = `project:ws-page`;
+
+  // 1. 创建测试文档源并写入 5 篇文档
+  const src = store.createSource({
+    id: 'src-page-test',
+    libraryId: libId,
+    kind: 'local',
+    locator: 'docs/test',
+    enabled: true,
+    syncStatus: 'ready',
+  });
+
+  for (let i = 1; i <= 5; i++) {
+    store.publishRevision({
+      sourceId: src.id,
+      sourceKey: `docs/doc-${i}.md`,
+      content: `Content of doc ${i}`,
+      hash: `hash-page-${i}`,
+      expectedPreviousRevisionId: null,
+      chunks: [],
+      fileSize: 100,
+    });
+  }
+
+  // 2. 验证文档总数与分页查询
+  const totalDocs = store.countDocuments({ libraryId: libId });
+  assert.equal(totalDocs, 5, '文档总数统计应为 5');
+
+  const page1Docs = store.listDocumentsPaged({ libraryId: libId, limit: 2, offset: 0 });
+  assert.equal(page1Docs.length, 2, '第 1 页应返回 2 篇文档');
+
+  const page2Docs = store.listDocumentsPaged({ libraryId: libId, limit: 2, offset: 2 });
+  assert.equal(page2Docs.length, 2, '第 2 页应返回 2 篇文档');
+
+  const page3Docs = store.listDocumentsPaged({ libraryId: libId, limit: 2, offset: 4 });
+  assert.equal(page3Docs.length, 1, '第 3 页应返回 1 篇文档');
+
+  const overflowDocs = store.listDocumentsPaged({ libraryId: libId, limit: 2, offset: 10 });
+  assert.equal(overflowDocs.length, 0, '超出范围时应返回空列表');
+
+  // 3. 写入 7 条知识条目并验证条目分页与总数
+  for (let i = 1; i <= 7; i++) {
+    store.createKnowledgeItem({
+      id: `item-page-${i}`,
+      kind: 'rule',
+      status: i <= 4 ? 'effective' : 'candidate',
+      text: `Knowledge rule ${i}`,
+      libraryId: libId,
+    });
+  }
+
+  const totalItems = service.countItems(ctx);
+  assert.equal(totalItems, 7, '条目总数统计应为 7');
+
+  const effectiveTotal = service.countItems(ctx, 'effective');
+  assert.equal(effectiveTotal, 4, '已生效条目总数应为 4');
+
+  const candidateTotal = service.countItems(ctx, 'candidate');
+  assert.equal(candidateTotal, 3, '候选条目总数应为 3');
+
+  const page1Items = service.listItems(ctx, undefined, 3, 0);
+  assert.equal(page1Items.length, 3, '条目第 1 页应返回 3 条');
+
+  const page2Items = service.listItems(ctx, undefined, 3, 3);
+  assert.equal(page2Items.length, 3, '条目第 2 页应返回 3 条');
+
+  const page3Items = service.listItems(ctx, undefined, 3, 6);
+  assert.equal(page3Items.length, 1, '条目第 3 页应返回 1 条');
+
+  const candidatePageItems = service.listItems(ctx, 'candidate', 2, 0);
+  assert.equal(candidatePageItems.length, 2, '候选条目第 1 页应返回 2 条');
+});
+
