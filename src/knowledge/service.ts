@@ -43,6 +43,7 @@ import type {
   KnowledgeRequest,
   GraphView,
   KnowledgeItem,
+  KnowledgeItemKind,
   KnowledgeStatus,
 } from './types.js';
 
@@ -514,6 +515,183 @@ export class KnowledgeService {
   }
 
   /**
+   * 创建新的知识/守则/避坑条目
+   */
+  createItem(
+    ctx: KnowledgeContext,
+    input: {
+      text: string;
+      kind?: KnowledgeItemKind;
+      status?: KnowledgeStatus;
+      applicability?: string;
+      libraryId?: string;
+      evidenceIds?: string[];
+      originRunId?: string;
+    }
+  ): KnowledgeItem {
+    const targetLibraryId = input.libraryId || `project:${ctx.workspaceId}`;
+    const accessibleIds = this.getManageableLibraryIds(ctx);
+    if (!accessibleIds.includes(targetLibraryId)) {
+      throw new Error(`Access denied to library: ${targetLibraryId}`);
+    }
+
+    const now = Date.now();
+    const item: KnowledgeItem = {
+      id: `item-${input.kind || 'rule'}-${randomUUID().slice(0, 8)}`,
+      kind: input.kind || 'rule',
+      status: input.status || 'effective',
+      text: input.text.trim(),
+      libraryId: targetLibraryId,
+      evidenceIds: input.evidenceIds || [],
+      applicability: input.applicability ? input.applicability.trim() : undefined,
+      originRunId: input.originRunId,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.store.createKnowledgeItem(item);
+
+    // 索引同步
+    if (item.status === 'effective') {
+      this.store.vectorStore.upsertIndexedChunks([
+        {
+          id: `item-chunk-${item.id}`,
+          text: item.text,
+          source: `knowledge-item:${item.id}`,
+          chunkIndex: 0,
+          collectionId: `${item.libraryId}:effective`,
+        },
+      ]);
+      this.store.db.prepare(`UPDATE generation SET version = version + 1 WHERE id = 1`).run();
+    }
+
+    return item;
+  }
+
+  /**
+   * 获取单条知识条目
+   */
+  getItem(ctx: KnowledgeContext, id: string): KnowledgeItem | null {
+    const item = this.store.getKnowledgeItem(id);
+    if (!item) return null;
+    const accessibleIds = this.getManageableLibraryIds(ctx);
+    if (!accessibleIds.includes(item.libraryId)) {
+      return null;
+    }
+    return item;
+  }
+
+  /**
+   * 删除知识条目
+   */
+  deleteItem(ctx: KnowledgeContext, id: string): boolean {
+    const existing = this.store.getKnowledgeItem(id);
+    if (!existing) {
+      throw new Error(`Knowledge item not found: ${id}`);
+    }
+    const accessibleIds = this.getManageableLibraryIds(ctx);
+    if (!accessibleIds.includes(existing.libraryId)) {
+      throw new Error(`Access denied to knowledge item: ${id}`);
+    }
+
+    this.store.vectorStore.removeChunks([
+      `item-chunk-${existing.id}`,
+      `chunk-${existing.id}`,
+      existing.id,
+    ]);
+    const ok = this.store.deleteKnowledgeItem(id);
+    if (ok) {
+      this.store.db.prepare(`UPDATE generation SET version = version + 1 WHERE id = 1`).run();
+    }
+    return ok;
+  }
+
+  /**
+   * 更新知识条目
+   */
+  updateItem(
+    ctx: KnowledgeContext,
+    id: string,
+    updates: Partial<KnowledgeItem>
+  ): KnowledgeItem {
+    const existing = this.store.getKnowledgeItem(id);
+    if (!existing) {
+      throw new Error(`Knowledge item not found: ${id}`);
+    }
+    const accessibleIds = this.getManageableLibraryIds(ctx);
+    if (!accessibleIds.includes(existing.libraryId)) {
+      throw new Error(`Access denied to knowledge item: ${id}`);
+    }
+
+    const updated = this.store.updateKnowledgeItem(id, updates);
+    if (!updated) {
+      throw new Error(`Failed to update knowledge item: ${id}`);
+    }
+
+    if (updated.status === 'effective') {
+      this.store.vectorStore.upsertIndexedChunks([
+        {
+          id: `item-chunk-${updated.id}`,
+          text: updated.text,
+          source: `knowledge-item:${updated.id}`,
+          chunkIndex: 0,
+          collectionId: `${updated.libraryId}:effective`,
+        },
+      ]);
+    } else {
+      this.store.vectorStore.removeChunks([
+        `item-chunk-${updated.id}`,
+        `chunk-${updated.id}`,
+        updated.id,
+      ]);
+    }
+    this.store.db.prepare(`UPDATE generation SET version = version + 1 WHERE id = 1`).run();
+
+    return updated;
+  }
+
+  /**
+   * 查询适用于指定路径的生效守则与避坑备忘列表
+   */
+  getGuardrails(ctx: KnowledgeContext, path: string): KnowledgeItem[] {
+    const accessibleIds = this.getManageableLibraryIds(ctx);
+    return this.store.findGuardrails({
+      libraryIds: accessibleIds,
+      path,
+    });
+  }
+
+  /**
+   * 获取格式化后的 JIT 防御性契约告警框 Markdown
+   * 若无匹配规则返回 null
+   */
+  getJitGuardrails(ctx: KnowledgeContext, touchedPath: string): string | null {
+    const items = this.getGuardrails(ctx, touchedPath);
+    if (!items || items.length === 0) return null;
+
+    const rules = items.filter((i) => i.kind === 'rule' || i.kind === 'decision');
+    const experiences = items.filter((i) => i.kind === 'experience' || i.kind === 'observation');
+
+    const lines: string[] = [`[PROJECT MEMO: ${touchedPath}]`];
+
+    if (rules.length > 0) {
+      lines.push('⚠️ 核心约束 (Rules/Decisions):');
+      for (const r of rules) {
+        lines.push(`- ${r.text.trim()}`);
+      }
+    }
+
+    if (experiences.length > 0) {
+      lines.push('💡 历史避坑 (Experiences/Anti-patterns):');
+      for (const e of experiences) {
+        lines.push(`- ${e.text.trim()}`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  /**
    * 预览从指定文档中提炼的核心知识条目（不写入数据库）
    */
   async previewExtractDocument(
@@ -764,6 +942,12 @@ export class KnowledgeService {
         ? this.options.embedderForWorkspace(ctx.workspaceId)
         : undefined;
       return executeIngest(this.store, ctx, request.input, embedder);
+    }
+    if (request.op === 'guardrails') {
+      return this.getGuardrails(ctx, request.input.path);
+    }
+    if (request.op === 'record_item') {
+      return this.createItem(ctx, request.input);
     }
     throw new Error(`Unknown knowledge op: ${(request as any).op}`);
   }

@@ -17,6 +17,7 @@ import { getLegacyRag } from './rag/legacy-runtime.js';
 import { KnowledgeService } from './knowledge/service.js';
 import { createKnowledgeRpcDispatcher } from './runtime/knowledge-rpc.js';
 import { createKnowledgeTools } from './tools/knowledge-tools.js';
+import { createJitGuardrailHook } from './knowledge/jit-guardrails.js';
 import type { KnowledgeContext } from './knowledge/types.js';
 import { MCPClient } from './tools/mcp-client.js';
 import { executeAgent as agentLoop } from './runtime/execution.js';
@@ -193,6 +194,18 @@ hookPipeline.registerPost('bash-timestamp', (toolName, _input, output) => {
   }
   return { action: 'allow' };
 });
+
+// 后置 Hook：JIT 工程守则与避坑唤醒（触碰代码或模块文件时自动注入防御性契约提示）
+const jitGuardrail = createJitGuardrailHook({
+  knowledgeService: getCliKnowledgeService(),
+  getContext: () => ({
+    workspaceId: cliWorkspaceId,
+    workspacePath: normalizedCwd,
+    agentId: 'general',
+    role: (configuredRole as 'owner' | 'collaborator' | 'guest') || 'owner',
+  }),
+});
+hookPipeline.registerPost('jit-guardrails', jitGuardrail.hook);
 
 registry.setHookPipeline(hookPipeline);
 

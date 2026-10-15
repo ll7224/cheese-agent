@@ -1052,6 +1052,94 @@ export class KnowledgeStore {
   }
 
   /**
+   * 删除知识条目
+   */
+  deleteKnowledgeItem(id: string): boolean {
+    const res = this.db.prepare(`DELETE FROM knowledge_items WHERE id = ?`).run(id);
+    return res.changes > 0;
+  }
+
+  /**
+   * 查找作用于指定路径的生效守则与避坑备忘 (Guardrails)
+   * 支持精确文件匹配、前缀目录匹配、以及全局通配符 '*' 匹配。
+   */
+  findGuardrails(options: {
+    libraryIds?: string[];
+    path: string;
+  }): import('./types.js').KnowledgeItem[] {
+    const where: string[] = ["status = 'effective'", "applicability IS NOT NULL AND applicability != ''"];
+    const params: any[] = [];
+
+    if (options.libraryIds && options.libraryIds.length > 0) {
+      where.push(`library_id IN (${options.libraryIds.map(() => '?').join(',')})`);
+      params.push(...options.libraryIds);
+    }
+
+    const sql = `SELECT * FROM knowledge_items WHERE ${where.join(' AND ')} ORDER BY created_at DESC`;
+    const rows = this.db.prepare(sql).all(...params) as any[];
+
+    const normalizedPath = options.path.replace(/^\.\//, '').replace(/\\/g, '/');
+
+    const matched: Array<{ item: import('./types.js').KnowledgeItem; priority: number; prefixLen: number }> = [];
+
+    for (const row of rows) {
+      const app = String(row.applicability || '').trim().replace(/^\.\//, '').replace(/\\/g, '/');
+      if (!app) continue;
+
+      let priority = 0;
+      let prefixLen = 0;
+
+      if (app === '*') {
+        priority = 1;
+        prefixLen = 0;
+      } else if (normalizedPath === app) {
+        priority = 3; // 精确匹配
+        prefixLen = app.length;
+      } else {
+        const appPrefix = app.endsWith('/') ? app : app + '/';
+        if (normalizedPath.startsWith(appPrefix) || normalizedPath.startsWith(app)) {
+          priority = 2; // 目录前缀匹配
+          prefixLen = app.length;
+        }
+      }
+
+      if (priority > 0) {
+        let evidenceIds: string[] = [];
+        try {
+          evidenceIds = JSON.parse(row.evidence_ids || '[]');
+        } catch {
+          evidenceIds = [];
+        }
+        matched.push({
+          item: {
+            id: row.id,
+            kind: row.kind,
+            status: row.status,
+            text: row.text,
+            libraryId: row.library_id,
+            evidenceIds,
+            applicability: row.applicability || undefined,
+            originRunId: row.origin_run_id || undefined,
+            supersedes: row.supersedes || undefined,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+          },
+          priority,
+          prefixLen,
+        });
+      }
+    }
+
+    matched.sort((a, b) => {
+      if (b.priority !== a.priority) return b.priority - a.priority;
+      if (b.prefixLen !== a.prefixLen) return b.prefixLen - a.prefixLen;
+      return (b.item.createdAt || 0) - (a.item.createdAt || 0);
+    });
+
+    return matched.map((m) => m.item);
+  }
+
+  /**
    * 记录 CaptureJob 作业
    */
   createCaptureJob(job: {

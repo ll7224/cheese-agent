@@ -266,6 +266,13 @@ export class KnowledgeController {
     }
 
     // 沉淀与经验分页与筛选
+    const createItemBtn = c.querySelector('#kn-create-item-btn');
+    if (createItemBtn) {
+      createItemBtn.addEventListener('click', () => {
+        this.showCreateItemDialog();
+      });
+    }
+
     const filterStatus = c.querySelector('#kn-items-filter-status');
     if (filterStatus) {
       filterStatus.addEventListener('change', () => {
@@ -1442,13 +1449,29 @@ export class KnowledgeController {
             ${item.supersedes ? `<div class="item-supersedes" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">替代旧条目: <code>${escapeHtml(item.supersedes)}</code></div>` : ''}
           </td>
           <td><code>${escapeHtml(item.applicability || '-')}</code></td>
-          <td>
+          <td class="action-cell">
+            <button class="mini-btn btn-edit-item action-tag-btn" type="button">编辑</button>
             <button class="mini-btn btn-correct-item action-tag-btn" type="button">纠错</button>
+            <button class="mini-btn btn-delete-item danger-text" type="button">删除</button>
           </td>
         `;
 
-        tr.querySelector('.btn-correct-item').addEventListener('click', () => {
+        tr.querySelector('.btn-edit-item')?.addEventListener('click', () => {
+          this.showEditItemDialog(item);
+        });
+
+        tr.querySelector('.btn-correct-item')?.addEventListener('click', () => {
           this.showCorrectItemDialog(item);
+        });
+
+        tr.querySelector('.btn-delete-item')?.addEventListener('click', async () => {
+          if (!confirm('确定要删除该条知识/避坑备忘吗？删除后不可恢复。')) return;
+          try {
+            await this.fetchApi(`/items/${item.id}`, { method: 'DELETE' });
+            await this.loadItems();
+          } catch (err) {
+            alert('删除失败: ' + err.message);
+          }
         });
 
         tbody.appendChild(tr);
@@ -1456,6 +1479,169 @@ export class KnowledgeController {
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="5" class="table-error">加载失败: ${escapeHtml(err.message)}</td></tr>`;
     }
+  }
+
+  showCreateItemDialog() {
+    const html = `
+      <dialog id="kn-modal-create-item" class="kn-modal kn-modal-wide">
+        <div class="dialog-heading">
+          <div class="dialog-title-group">
+            <span class="dialog-badge">工程守则与避坑</span>
+            <h2>新增工程避坑备忘 / 规约</h2>
+          </div>
+          <button class="kn-btn-icon btn-close-modal" type="button" aria-label="关闭">✕</button>
+        </div>
+        <form id="kn-create-item-form" class="kn-form">
+          <div class="form-row">
+            <label>适用作用域 (Scope / 路径前缀)</label>
+            <input id="kn-create-item-applicability" class="form-input" required placeholder="例如: src/knowledge/、web/knowledge/ 或 * (全局)" value="*" />
+            <span class="form-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+              当 Agent 触碰该文件或目录时，后置钩子将自动以此路径匹配并注入 JIT 防御性契约。
+            </span>
+          </div>
+          <div class="form-row" style="display: flex; gap: 12px;">
+            <div style="flex: 1;">
+              <label>规约类别 (Kind)</label>
+              <select id="kn-create-item-kind" class="form-select">
+                <option value="rule" selected>rule (核心规约/铁律)</option>
+                <option value="decision">decision (架构设计决策)</option>
+                <option value="experience">experience (历史避坑/排错经验)</option>
+                <option value="observation">observation (事实观察)</option>
+              </select>
+            </div>
+            <div style="flex: 1;">
+              <label>生效状态 (Status)</label>
+              <select id="kn-create-item-status" class="form-select">
+                <option value="effective" selected>已生效 (effective)</option>
+                <option value="candidate">候选建议 (candidate)</option>
+                <option value="needs_review">待复核 (needs_review)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>规约内容或避坑做法 (Rule)</label>
+            <textarea id="kn-create-item-rule" rows="3" class="form-textarea" required placeholder="说明明确的规约或禁忌，例如：数据库变更必须通过 schema.ts 迁移，严禁手写未注册的 DDL。"></textarea>
+          </div>
+          <div class="form-row">
+            <label>背景动机 / 踩坑原因与证据 (Rationale，可选)</label>
+            <textarea id="kn-create-item-rationale" rows="2" class="form-textarea" placeholder="说明为什么制定本规则、历史缺陷排查原因或命令输出证据…"></textarea>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="ghost-btn btn-close-modal">取消</button>
+            <button type="submit" class="kn-btn kn-btn-primary">确认沉淀入库</button>
+          </div>
+        </form>
+      </dialog>
+    `;
+
+    this.openModal(html, (dialog, closeModal) => {
+      dialog.querySelector('#kn-create-item-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const applicability = dialog.querySelector('#kn-create-item-applicability').value.trim() || '*';
+        const kind = dialog.querySelector('#kn-create-item-kind').value;
+        const status = dialog.querySelector('#kn-create-item-status').value;
+        const rule = dialog.querySelector('#kn-create-item-rule').value.trim();
+        const rationale = dialog.querySelector('#kn-create-item-rationale').value.trim();
+        if (!rule) return;
+
+        const text = rationale ? `${rule}\n【原因/证据】：${rationale}` : rule;
+
+        try {
+          await this.fetchApi('/items', {
+            method: 'POST',
+            body: {
+              applicability,
+              kind,
+              status,
+              text,
+              libraryId: this.currentLibraryId,
+            },
+          });
+          closeModal();
+          await this.loadItems();
+        } catch (err) {
+          alert('创建沉淀条目失败: ' + err.message);
+        }
+      });
+    });
+  }
+
+  showEditItemDialog(item) {
+    const html = `
+      <dialog id="kn-modal-edit-item" class="kn-modal kn-modal-wide">
+        <div class="dialog-heading">
+          <div class="dialog-title-group">
+            <span class="dialog-badge">编辑规约备忘</span>
+            <h2>编辑知识条目</h2>
+          </div>
+          <button class="kn-btn-icon btn-close-modal" type="button" aria-label="关闭">✕</button>
+        </div>
+        <form id="kn-edit-item-form" class="kn-form">
+          <div class="form-row">
+            <label>适用作用域 (Scope / 路径前缀)</label>
+            <input id="kn-edit-item-applicability" class="form-input" required value="${escapeHtml(item.applicability || '*')}" />
+            <span class="form-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+              支持目录前缀如 <code>src/knowledge/</code>，单文件如 <code>src/main.ts</code> 或全局 <code>*</code>。
+            </span>
+          </div>
+          <div class="form-row" style="display: flex; gap: 12px;">
+            <div style="flex: 1;">
+              <label>规约类别 (Kind)</label>
+              <select id="kn-edit-item-kind" class="form-select">
+                <option value="rule" ${item.kind === 'rule' ? 'selected' : ''}>rule (核心规约/铁律)</option>
+                <option value="decision" ${item.kind === 'decision' ? 'selected' : ''}>decision (架构设计决策)</option>
+                <option value="experience" ${item.kind === 'experience' ? 'selected' : ''}>experience (历史避坑/排错经验)</option>
+                <option value="observation" ${item.kind === 'observation' ? 'selected' : ''}>observation (事实观察)</option>
+              </select>
+            </div>
+            <div style="flex: 1;">
+              <label>生效状态 (Status)</label>
+              <select id="kn-edit-item-status" class="form-select">
+                <option value="effective" ${item.status === 'effective' ? 'selected' : ''}>已生效 (effective)</option>
+                <option value="candidate" ${item.status === 'candidate' ? 'selected' : ''}>候选建议 (candidate)</option>
+                <option value="needs_review" ${item.status === 'needs_review' ? 'selected' : ''}>待复核 (needs_review)</option>
+                <option value="invalidated" ${item.status === 'invalidated' ? 'selected' : ''}>已失效 (invalidated)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>条目内容与指南 (Text)</label>
+            <textarea id="kn-edit-item-text" rows="5" class="form-textarea" required>${escapeHtml(item.text)}</textarea>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="ghost-btn btn-close-modal">取消</button>
+            <button type="submit" class="kn-btn kn-btn-primary">保存修改</button>
+          </div>
+        </form>
+      </dialog>
+    `;
+
+    this.openModal(html, (dialog, closeModal) => {
+      dialog.querySelector('#kn-edit-item-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const applicability = dialog.querySelector('#kn-edit-item-applicability').value.trim() || '*';
+        const kind = dialog.querySelector('#kn-edit-item-kind').value;
+        const status = dialog.querySelector('#kn-edit-item-status').value;
+        const text = dialog.querySelector('#kn-edit-item-text').value.trim();
+        if (!text) return;
+
+        try {
+          await this.fetchApi(`/items/${item.id}`, {
+            method: 'PATCH',
+            body: {
+              applicability,
+              kind,
+              status,
+              text,
+            },
+          });
+          closeModal();
+          await this.loadItems();
+        } catch (err) {
+          alert('更新失败: ' + err.message);
+        }
+      });
+    });
   }
 
   showCorrectItemDialog(item) {

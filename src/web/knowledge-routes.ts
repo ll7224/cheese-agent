@@ -643,6 +643,76 @@ export function createKnowledgeRoutes(runtime: Runtime): Hono {
     return context.json(items);
   });
 
+  // 14.1 POST /api/v1/workspaces/:id/knowledge/items - 创建新知识/避坑备忘条目
+  routes.post('/api/v1/workspaces/:id/knowledge/items', async (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const body = await context.req.json();
+    if (!body.text || typeof body.text !== 'string' || body.text.trim().length === 0) {
+      return context.json({ error: '条目内容 text 必填' }, 400);
+    }
+    try {
+      const item = runtime.knowledgeService.createItem(ctx, {
+        text: body.text,
+        kind: body.kind,
+        status: body.status,
+        applicability: body.applicability,
+        libraryId: body.libraryId,
+      });
+      return context.json(item, 201);
+    } catch (err: any) {
+      if (err.message?.includes('denied')) {
+        throw new RuntimeError(err.message, 403);
+      }
+      throw new RuntimeError(err.message || '创建条目失败', 400);
+    }
+  });
+
+  // 14.2 PATCH /api/v1/workspaces/:id/knowledge/items/:itemId - 更新知识/避坑条目
+  routes.patch('/api/v1/workspaces/:id/knowledge/items/:itemId', async (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const itemId = context.req.param('itemId');
+    const body = await context.req.json();
+    try {
+      const updated = runtime.knowledgeService.updateItem(ctx, itemId, body);
+      return context.json(updated);
+    } catch (err: any) {
+      if (err.message?.includes('not found')) {
+        throw new RuntimeError(err.message, 404);
+      }
+      if (err.message?.includes('denied')) {
+        throw new RuntimeError(err.message, 403);
+      }
+      throw new RuntimeError(err.message || '更新条目失败', 400);
+    }
+  });
+
+  // 14.3 DELETE /api/v1/workspaces/:id/knowledge/items/:itemId - 删除知识条目
+  routes.delete('/api/v1/workspaces/:id/knowledge/items/:itemId', (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const itemId = context.req.param('itemId');
+    try {
+      const success = runtime.knowledgeService.deleteItem(ctx, itemId);
+      return context.json({ success });
+    } catch (err: any) {
+      if (err.message?.includes('not found')) {
+        throw new RuntimeError(err.message, 404);
+      }
+      if (err.message?.includes('denied')) {
+        throw new RuntimeError(err.message, 403);
+      }
+      throw new RuntimeError(err.message || '删除条目失败', 400);
+    }
+  });
+
+  // 14.4 GET /api/v1/workspaces/:id/knowledge/guardrails - 查询指定路径的 JIT 守则
+  routes.get('/api/v1/workspaces/:id/knowledge/guardrails', (context) => {
+    const { ctx } = getContext(context.req.param('id'));
+    const path = context.req.query('path') || '';
+    const items = runtime.knowledgeService.getGuardrails(ctx, path);
+    const memo = runtime.knowledgeService.getJitGuardrails(ctx, path);
+    return context.json({ path, items, memo });
+  });
+
   // 15. POST /api/v1/workspaces/:id/knowledge/items/:itemId/correct
   routes.post('/api/v1/workspaces/:id/knowledge/items/:itemId/correct', async (context) => {
     const { ctx } = getContext(context.req.param('id'));

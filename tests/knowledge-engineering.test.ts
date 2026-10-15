@@ -6,6 +6,9 @@ import { createKnowledgeTestEnv } from './helpers/knowledge-fixture.js';
 import { KnowledgeService } from '../src/knowledge/service.js';
 import { chunkWithSpans } from '../src/knowledge/chunks.js';
 import { bindLibraryWorkspaces, getLibraryWorkspaceIds } from '../src/knowledge/libraries.js';
+import { createJitGuardrailHook } from '../src/knowledge/jit-guardrails.js';
+import { createKnowledgeRpcDispatcher } from '../src/runtime/knowledge-rpc.js';
+import { createKnowledgeTools } from '../src/tools/knowledge-tools.js';
 import type { KnowledgeContext, SearchRequest } from '../src/knowledge/types.js';
 import type { CaptureInput } from '../src/knowledge/capture.js';
 
@@ -909,4 +912,195 @@ test('P3-Scenario 14: 列表分页支持与统计总数测试 (Pagination and To
   const candidatePageItems = service.listItems(ctx, 'candidate', 2, 0);
   assert.equal(candidatePageItems.length, 2, '候选条目第 1 页应返回 2 条');
 });
+
+test('P3-Scenario 15: 极简工程避坑备忘录与JIT触碰唤醒体系测试 (Minimal Guardrails & JIT Touch-Triggered Memory)', async (t) => {
+  const env = createKnowledgeTestEnv(t);
+  const store = env.store;
+  const service = new KnowledgeService({
+    dataDir: env.tempDir,
+    store,
+  });
+
+  const ctx: KnowledgeContext = {
+    workspaceId: 'ws-guardrails',
+    workspacePath: env.tempDir,
+    agentId: 'general',
+    role: 'owner',
+  };
+  service.attachWorkspace(ctx);
+  const projectLibId = 'project:ws-guardrails';
+
+  // 1. 创建多层级作用域规约与避坑经验条目
+  // 1.1 全局规约 (*)
+  const itemGlobal = service.createItem(ctx, {
+    text: '严禁向 Git 仓库提交敏感凭证、.env 文件与未经脱敏的内部 Token',
+    applicability: '*',
+    kind: 'rule',
+    status: 'effective',
+    libraryId: projectLibId,
+  });
+
+  // 1.2 模块前缀规约 (src/knowledge/)
+  const itemModuleRule = service.createItem(ctx, {
+    text: '数据库结构变更必须统一由 schema.ts 迁移驱动，严禁手写未注册的 DDL 表结构',
+    applicability: 'src/knowledge/',
+    kind: 'rule',
+    status: 'effective',
+    libraryId: projectLibId,
+  });
+
+  // 1.3 模块历史避坑经验 (src/knowledge/)
+  const itemModuleExp = service.createItem(ctx, {
+    text: 'SQLite 在高并发下可能有 SQLITE_BUSY 锁等待，必须统一配置 WAL 模式与 5000ms busyTimeout',
+    applicability: 'src/knowledge/',
+    kind: 'experience',
+    status: 'effective',
+    libraryId: projectLibId,
+  });
+
+  // 1.4 精确文件规约 (src/knowledge/store.ts)
+  const itemExactFile = service.createItem(ctx, {
+    text: 'findGuardrails 必须支持精确路径 > 最长前缀目录 > 全局通配符三级优先级排序',
+    applicability: 'src/knowledge/store.ts',
+    kind: 'rule',
+    status: 'effective',
+    libraryId: projectLibId,
+  });
+
+  // 1.5 候选状态条目 (candidate - 尚未生效，不应作为 JIT 契约唤醒)
+  const itemCandidate = service.createItem(ctx, {
+    text: '草稿备忘：考虑将向量嵌入切换为本地轻量级 ONNX 模型',
+    applicability: 'src/knowledge/',
+    kind: 'observation',
+    status: 'candidate',
+    libraryId: projectLibId,
+  });
+
+  // 2. 验证存储层与服务层前缀与精准匹配及优先级排序 (findGuardrails)
+  // 当触碰 src/knowledge/store.ts 时，应匹配 itemExactFile (优先级 3) > itemModuleRule / itemModuleExp (优先级 2) > itemGlobal (优先级 1)
+  const storeGuardrails = service.getGuardrails(ctx, 'src/knowledge/store.ts');
+  assert.equal(storeGuardrails.length, 4, '应命中精确文件、前缀目录和全局 4 条已生效条目，忽略 candidate');
+  assert.equal(storeGuardrails[0].id, itemExactFile.id, '精确匹配文件必须排在第 1 位');
+  assert.ok(
+    storeGuardrails[1].id === itemModuleRule.id || storeGuardrails[1].id === itemModuleExp.id,
+    '模块前缀条目排在第 2/3 位'
+  );
+  assert.equal(storeGuardrails[3].id, itemGlobal.id, '全局通配符 * 必须排在最后');
+
+  // 当触碰 src/knowledge/service.ts 时，不命中 itemExactFile，但命中模块前缀和全局
+  const serviceGuardrails = service.getGuardrails(ctx, 'src/knowledge/service.ts');
+  assert.equal(serviceGuardrails.length, 3, '应命中模块前缀 2 条与全局 1 条');
+  assert.ok(!serviceGuardrails.some((g) => g.id === itemExactFile.id), '不应命中无关的精确文件规约');
+
+  // 当触碰完全无关的路径 docs/readme.md 时，仅命中全局 *
+  const docsGuardrails = service.getGuardrails(ctx, 'docs/readme.md');
+  assert.equal(docsGuardrails.length, 1, '无关路径仅命中全局 * 规约');
+  assert.equal(docsGuardrails[0].id, itemGlobal.id);
+
+  // 3. 验证防御性契约备忘录格式化输出 (getJitGuardrails)
+  const memo = service.getJitGuardrails(ctx, 'src/knowledge/store.ts');
+  assert.ok(memo, '应生成 JIT 备忘录文本');
+  assert.ok(memo.includes('[PROJECT MEMO: src/knowledge/store.ts]'), '包含契约标题');
+  assert.ok(memo.includes('⚠️ 核心约束 (Rules/Decisions):'), '包含约束小节');
+  assert.ok(memo.includes('💡 历史避坑 (Experiences/Anti-patterns):'), '包含避坑经验小节');
+  assert.ok(memo.includes('SQLITE_BUSY 锁等待'), '包含经验条目正文');
+  assert.ok(!memo.includes('草稿备忘'), '不得包含未生效的 candidate 条目');
+
+  // 4. 验证 JIT Hook 触碰拦截与会话防刷屏去重机制 (createJitGuardrailHook)
+  const { hook, resetSession, touchedScopes } = createJitGuardrailHook({
+    knowledgeService: service,
+    getContext: () => ctx,
+    deduplicatePerSession: true,
+  });
+
+  // 4.1 模拟工具 read_file 首次读取 src/knowledge/store.ts
+  const firstReadRes = await hook(
+    'read_file',
+    { path: 'src/knowledge/store.ts' },
+    'export class KnowledgeStore { ... }'
+  );
+  assert.equal(firstReadRes.action, 'modify', '首次触碰应返回 modify 动作注入备忘录');
+  assert.ok((firstReadRes as any).modifiedOutput.includes('[PROJECT MEMO: src/knowledge/store.ts]'));
+  assert.ok((firstReadRes as any).modifiedOutput.startsWith('export class KnowledgeStore'));
+
+  // 验证 touchedScopes 记录了触碰过的作用域
+  assert.ok(touchedScopes.has('src/knowledge/store.ts'));
+  assert.ok(touchedScopes.has('src/knowledge/'));
+  assert.ok(touchedScopes.has('*'));
+
+  // 4.2 模拟连续读取或编辑同一模块内文件（防刷屏去重）
+  const secondReadRes = await hook(
+    'read_file',
+    { path: 'src/knowledge/service.ts' },
+    'export class KnowledgeService { ... }'
+  );
+  assert.equal(secondReadRes.action, 'allow', '同一会话内相同作用域再次触碰应静默放行，避免刷屏');
+
+  // 4.3 模拟修改已触碰过的文件
+  const editRes = await hook(
+    'edit_file',
+    { path: 'src/knowledge/store.ts' },
+    'File edited successfully'
+  );
+  assert.equal(editRes.action, 'allow', '编辑已提示过的模块应放行');
+
+  // 4.4 会话重置 (例如开启新会话或新轮次任务)
+  resetSession();
+  assert.equal(touchedScopes.size, 0, '会话作用域记录已清空');
+
+  const afterResetReadRes = await hook(
+    'read_file',
+    { path: 'src/knowledge/service.ts' },
+    'service code'
+  );
+  assert.equal(afterResetReadRes.action, 'modify', '会话重置后可重新唤醒契约注入');
+
+  // 5. 验证 RPC 调度与 record_guardrail 智能体工具端到端沉淀
+  const rpc = createKnowledgeRpcDispatcher(service, ctx);
+  const tools = createKnowledgeTools(rpc);
+  const recordTool = tools.find((t) => t.name === 'record_guardrail');
+  assert.ok(recordTool, 'record_guardrail 工具已注册');
+
+  const toolExecResult = await recordTool.execute({
+    applicability: 'web/knowledge/',
+    kind: 'experience',
+    rule: '知识条目列表渲染时必须保护空列表，不得对负索引执行数学运算',
+    rationale: '在空数据下曾出现 Math.max(0, ...) 缺失导致的越界报错',
+  });
+  assert.ok(toolExecResult.includes('已成功沉淀工程守则备忘'), '工具执行成功返回确认信息');
+
+  // 验证沉淀后即刻生效并可被 JIT 检索感知
+  const webGuardrails = service.getGuardrails(ctx, 'web/knowledge/views.js');
+  assert.ok(
+    webGuardrails.some((g) => g.text.includes('知识条目列表渲染时必须保护空列表')),
+    '新沉淀的避坑备忘应立即可被 web/knowledge/views.js 触碰唤醒'
+  );
+
+  // 6. 验证条目管理 (Update & Delete)
+  const itemsBefore = service.listItems(ctx);
+  const targetItem = itemsBefore.find((i) => i.text.includes('知识条目列表渲染时必须保护空列表'));
+  assert.ok(targetItem, '找到待更新条目');
+
+  // 更新条目
+  const updatedItem = service.updateItem(ctx, targetItem.id, {
+    text: '知识条目列表渲染时必须保护空列表，且分页控件必须正确禁用上下页按钮',
+    applicability: 'web/knowledge/',
+    kind: 'rule',
+  });
+  assert.equal(updatedItem.text, '知识条目列表渲染时必须保护空列表，且分页控件必须正确禁用上下页按钮');
+  assert.equal(updatedItem.kind, 'rule');
+
+  // 删除条目
+  const deleteSuccess = service.deleteItem(ctx, targetItem.id);
+  assert.equal(deleteSuccess, true, '条目应成功删除');
+  assert.equal(service.getItem(ctx, targetItem.id), null, '删除后查询应为 null');
+
+  // 验证删除后不再出现在 JIT 触碰守则中
+  const webGuardrailsAfterDel = service.getGuardrails(ctx, 'web/knowledge/views.js');
+  assert.ok(
+    !webGuardrailsAfterDel.some((g) => g.id === targetItem.id),
+    '删除的条目不得再被 JIT 触碰命中'
+  );
+});
+
 

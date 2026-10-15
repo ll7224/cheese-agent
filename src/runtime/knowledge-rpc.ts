@@ -34,11 +34,30 @@ export const IngestRequestSchema = z
   })
   .strict();
 
+export const GuardrailsRequestSchema = z
+  .object({
+    path: z.string().min(1),
+    libraryIds: z.array(z.string()).optional(),
+  })
+  .strict();
+
+export const RecordItemRequestSchema = z
+  .object({
+    text: z.string().min(1),
+    applicability: z.string().optional(),
+    kind: z.enum(['rule', 'decision', 'observation', 'experience']).optional(),
+    libraryId: z.string().optional(),
+    status: z.enum(['candidate', 'effective', 'needs_review', 'invalidated']).optional(),
+  })
+  .strict();
+
 export const KnowledgeRequestSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('search'), input: SearchRequestSchema }),
   z.object({ op: z.literal('citation'), input: CitationRequestSchema }),
   z.object({ op: z.literal('graph'), input: GraphRequestSchema }),
   z.object({ op: z.literal('ingest'), input: IngestRequestSchema }),
+  z.object({ op: z.literal('guardrails'), input: GuardrailsRequestSchema }),
+  z.object({ op: z.literal('record_item'), input: RecordItemRequestSchema }),
 ]);
 
 export const RPC_TIMEOUT_MS = 15000;

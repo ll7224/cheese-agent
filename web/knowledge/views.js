@@ -321,6 +321,10 @@ export function buildKnowledgeShell() {
             </div>
           </div>
           <div class="toolbar-right">
+            <button id="kn-create-item-btn" class="kn-btn kn-btn-primary" type="button">
+              ${ICONS.plus}
+              <span>＋ 新增避坑备忘</span>
+            </button>
             <button id="kn-refresh-items-btn" class="kn-btn kn-btn-secondary" type="button">
               ${ICONS.refresh}
               <span>刷新沉淀</span>
@@ -333,9 +337,9 @@ export function buildKnowledgeShell() {
               <tr>
                 <th style="width: 100px;">类型</th>
                 <th style="width: 100px;">状态</th>
-                <th>内容与结论</th>
-                <th style="width: 160px;">适用环境</th>
-                <th style="width: 100px; text-align: right;">操作</th>
+                <th>守则内容与避坑指南</th>
+                <th style="width: 180px;">适用路径 (Scope)</th>
+                <th style="width: 150px; text-align: right;">操作</th>
               </tr>
             </thead>
             <tbody id="kn-items-tbody">

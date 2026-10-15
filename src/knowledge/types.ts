@@ -75,7 +75,9 @@ export type KnowledgeRequest =
   | { op: 'search'; input: SearchRequest }
   | { op: 'citation'; input: { citationId: string } }
   | { op: 'graph'; input: { entityId: string; hops: 1 | 2 } }
-  | { op: 'ingest'; input: { path?: string; content?: string; name?: string; libraryId: string } };
+  | { op: 'ingest'; input: { path?: string; content?: string; name?: string; libraryId: string } }
+  | { op: 'guardrails'; input: { path: string; libraryIds?: string[] } }
+  | { op: 'record_item'; input: { text: string; applicability?: string; kind?: KnowledgeItemKind; libraryId?: string; status?: KnowledgeStatus } };
 
 export type KnowledgeRpc = (request: KnowledgeRequest) => Promise<unknown>;
 
@@ -177,7 +179,7 @@ export interface GraphView {
   truncated: boolean;
 }
 
-export type KnowledgeItemKind = 'decision' | 'observation' | 'experience';
+export type KnowledgeItemKind = 'rule' | 'decision' | 'observation' | 'experience';
 
 export interface KnowledgeItem {
   id: string;

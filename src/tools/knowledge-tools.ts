@@ -161,5 +161,67 @@ export function createKnowledgeTools(rpc: KnowledgeRpc, emit?: (event: any) => v
     },
   };
 
-  return [ragSearchTool, ragIngestTool, knowledgeGraphTool];
+  const recordGuardrailTool: ToolDefinition = {
+    name: 'record_guardrail',
+    description: '沉淀工程避坑备忘录、架构核心约束或经验规则。当用户要求记录经验、或解决关键疑难问题后需持久化避坑指南时使用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        applicability: {
+          type: 'string',
+          description: '适用模块或路径前缀（如 "src/knowledge/"、"web/knowledge/"、"src/knowledge/store.ts" 或 "*" 全局）',
+        },
+        kind: {
+          type: 'string',
+          enum: ['rule', 'decision', 'experience'],
+          description: '类别：rule（核心规约/铁律）、decision（架构设计决策）、experience（避坑排错经验）',
+        },
+        rule: {
+          type: 'string',
+          description: '核心规约或做法（应该怎么做/禁止怎么做）',
+        },
+        rationale: {
+          type: 'string',
+          description: '背景动机、原因解释或排查缺陷证据',
+        },
+        library_id: {
+          type: 'string',
+          description: '可选指定知识库 ID，默认沉淀入当前工作区项目库',
+        },
+      },
+      required: ['applicability', 'rule'],
+      additionalProperties: false,
+    },
+    isConcurrencySafe: false,
+    isReadOnly: false,
+    execute: async (args: any) => {
+      try {
+        const applicability = (args.applicability || '*').trim();
+        const kind = args.kind || 'rule';
+        const ruleText = (args.rule || '').trim();
+        const rationaleText = (args.rationale || '').trim();
+
+        const fullText = rationaleText
+          ? `${ruleText}\n【原因/证据】：${rationaleText}`
+          : ruleText;
+
+        const res = (await rpc({
+          op: 'record_item',
+          input: {
+            applicability,
+            kind,
+            status: 'effective',
+            text: fullText,
+            libraryId: args.library_id,
+          },
+        })) as any;
+
+        return `已成功沉淀工程守则备忘（ID: ${res.id || 'ok'}, 适用作用域: ${applicability}, 类别: ${kind}）。后续 Agent 触碰该模块路径时将自动获得 JIT 契约预警。`;
+      } catch (err: any) {
+        return `沉淀失败: ${err.message}`;
+      }
+    },
+  };
+
+  return [ragSearchTool, ragIngestTool, knowledgeGraphTool, recordGuardrailTool];
 }
