@@ -1,5 +1,9 @@
 # 🧀 Cheese Agent
 
+> **已停止维护（2026-11-20）。** 自研 Agent 执行循环不再开发，后续工作转到 [cheese-agent-os](https://github.com/ll7224/cheese-agent-os)：在桌面端统一驱动 Claude Code、Codex、Antigravity 等 Agent 并处理需要人介入的事项。本仓库保留为历史参考。
+>
+> **Archived (2026-11-20).** The in-house agent loop is no longer developed. Work continues in [cheese-agent-os](https://github.com/ll7224/cheese-agent-os), a desktop cockpit that drives Claude Code, Codex, and Antigravity and surfaces what needs a human. This repository is kept for reference.
+
 [中文 (Chinese)](#-cheese-agent-中文) | [English](#-cheese-agent-english)
 
 本机 Web 工作台：`npm run web` → `http://127.0.0.1:3210`。支持多目录、多会话并发和任务树停止，详见[安装与使用](docs/local-web-workbench.md)及[验收记录](docs/verification/local-agent-ui.md)。
