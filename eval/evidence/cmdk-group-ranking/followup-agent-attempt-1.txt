@@ -1,0 +1,62 @@
+exitCode: 1
+timedOut: False
+
+STDOUT
+
+Running 1 test using 1 worker
+
+  ✘  [chrome] › duplicate-groups.test.js:3:1 › groups with identical headings keep independent identity when sorting (5s)
+
+
+  1) [chrome] › duplicate-groups.test.js:3:1 › groups with identical headings keep independent identity when sorting 
+
+    Test timeout of 5000ms exceeded.
+
+    Error: expect(received).toHaveAttribute(expected)
+
+    Expected string: "high-score-group"
+    Received string: "low-score-group"
+    Call log:
+      - expect.toHaveAttribute with timeout 5000ms
+      - waiting for selector "[cmdk-group] >> nth=0"
+      -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>
+      -   unexpected value "low-score-group"
+      -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>
+      -   unexpected value "low-score-group"
+      -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>
+      -   unexpected value "low-score-group"
+      -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>
+      -   unexpected value "low-score-group"
+      -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>
+      -   unexpected value "low-score-group"
+      -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>
+      -   unexpected value "low-score-group"
+      -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>
+      -   unexpected value "low-score-group"
+
+
+      4 |   await page.goto('/duplicate-groups');
+      5 |   await page.locator('[cmdk-input]').fill('rank');
+    > 6 |   await expect(page.locator('[cmdk-group]').first()).toHaveAttribute('data-testid', 'high-score-group');
+        |                                                      ^
+      7 | });
+      8 |
+
+        at /private/tmp/cheese-m1-dynamic-groups/workspace/test/duplicate-groups.test.js:6:54
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+    attachment #1: screenshot (image/png) ----------------------------------------------------------
+    ../evidence/followup-red/duplicate-groups-groups-with-identical-headings-keep-independent-identity-when-sorting-chrome/test-failed-1.png
+    ------------------------------------------------------------------------------------------------
+
+
+  1 failed
+    [chrome] › duplicate-groups.test.js:3:1 › groups with identical headings keep independent identity when sorting 
+
+STDERR
+[WebServer] Browserslist: caniuse-lite is outdated. Please run:
+  npx browserslist@latest --update-db
+  Why you should do it regularly: https://github.com/browserslist/browserslist#browsers-data-updating

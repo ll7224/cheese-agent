@@ -1,0 +1,160 @@
+
+Running 9 tests using 1 worker
+
+[WebServer] Browserslist: caniuse-lite is outdated. Please run:
+  npx browserslist@latest --update-db
+  Why you should do it regularly: https://github.com/browserslist/browserslist#browsers-data-updating
+  ✓  [chrome] › keybind.test.ts:8:3 › arrow keybinds › arrow up/down changes selected item (1s)
+  ✘  [chrome] › keybind.test.ts:16:3 › arrow keybinds › meta arrow up/down goes to first and last item (5s)
+  ✓  [chrome] › keybind.test.ts:24:3 › arrow keybinds › alt arrow up/down goes to next and prev item (554ms)
+  ✓  [chrome] › keybind.test.ts:42:3 › vim jk keybinds › ctrl j/k changes selected item (452ms)
+  ✘  [chrome] › keybind.test.ts:50:3 › vim jk keybinds › meta ctrl j/k goes to first and last item (5s)
+  ✓  [chrome] › keybind.test.ts:58:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item (522ms)
+  ✓  [chrome] › keybind.test.ts:76:3 › vim np keybinds › ctrl n/p changes selected item (442ms)
+  ✘  [chrome] › keybind.test.ts:84:3 › vim np keybinds › meta ctrl n/p goes to first and last item (5s)
+  ✓  [chrome] › keybind.test.ts:92:3 › vim np keybinds › alt ctrl n/p goes to next and prev item (535ms)
+
+
+  1) [chrome] › keybind.test.ts:16:3 › arrow keybinds › meta arrow up/down goes to first and last item 
+
+    Test timeout of 5000ms exceeded.
+
+    Error: expect(received).toHaveAttribute(expected)
+
+    Expected string: "last"
+    Received string: "first"
+    Call log:
+      - expect.toHaveAttribute with timeout 5000ms
+      - waiting for selector "[cmdk-item][aria-selected="true"]"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+
+
+      17 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+      18 |     await page.locator(`[cmdk-input]`).press('Meta+ArrowDown')
+    > 19 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'last')
+         |                                                                     ^
+      20 |     await page.locator(`[cmdk-input]`).press('Meta+ArrowUp')
+      21 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+      22 |   })
+
+        at $CASE_ROOT/cmdk-9fae175d9bc993d0f72275388429ac0825a72108/test/keybind.test.ts:19:69
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+    attachment #1: screenshot (image/png) ----------------------------------------------------------
+    ../evidence/baseline-chrome/keybind-arrow-keybinds-meta-arrow-up-down-goes-to-first-and-last-item-chrome/test-failed-1.png
+    ------------------------------------------------------------------------------------------------
+
+  2) [chrome] › keybind.test.ts:50:3 › vim jk keybinds › meta ctrl j/k goes to first and last item =
+
+    Test timeout of 5000ms exceeded.
+
+    Error: expect(received).toHaveAttribute(expected)
+
+    Expected string: "last"
+    Received string: "first"
+    Call log:
+      - expect.toHaveAttribute with timeout 5000ms
+      - waiting for selector "[cmdk-item][aria-selected="true"]"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+
+
+      51 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+      52 |     await page.locator(`[cmdk-input]`).press('Meta+Control+j')
+    > 53 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'last')
+         |                                                                     ^
+      54 |     await page.locator(`[cmdk-input]`).press('Meta+Control+k')
+      55 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+      56 |   })
+
+        at $CASE_ROOT/cmdk-9fae175d9bc993d0f72275388429ac0825a72108/test/keybind.test.ts:53:69
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+    attachment #1: screenshot (image/png) ----------------------------------------------------------
+    ../evidence/baseline-chrome/keybind-vim-jk-keybinds-meta-ctrl-j-k-goes-to-first-and-last-item-chrome/test-failed-1.png
+    ------------------------------------------------------------------------------------------------
+
+  3) [chrome] › keybind.test.ts:84:3 › vim np keybinds › meta ctrl n/p goes to first and last item =
+
+    Test timeout of 5000ms exceeded.
+
+    Error: expect(received).toHaveAttribute(expected)
+
+    Expected string: "last"
+    Received string: "first"
+    Call log:
+      - expect.toHaveAttribute with timeout 5000ms
+      - waiting for selector "[cmdk-item][aria-selected="true"]"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+      -   selector resolved to <div cmdk-item="" role="option" data-value="first" ar…>First</div>
+      -   unexpected value "first"
+
+
+      85 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+      86 |     await page.locator(`[cmdk-input]`).press('Meta+Control+n')
+    > 87 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'last')
+         |                                                                     ^
+      88 |     await page.locator(`[cmdk-input]`).press('Meta+Control+p')
+      89 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+      90 |   })
+
+        at $CASE_ROOT/cmdk-9fae175d9bc993d0f72275388429ac0825a72108/test/keybind.test.ts:87:69
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+    attachment #1: screenshot (image/png) ----------------------------------------------------------
+    ../evidence/baseline-chrome/keybind-vim-np-keybinds-meta-ctrl-n-p-goes-to-first-and-last-item-chrome/test-failed-1.png
+    ------------------------------------------------------------------------------------------------
+
+  Slow test file: [chrome] › keybind.test.ts (19s)
+  Consider splitting slow test files to speed up parallel execution
+
+  3 failed
+    [chrome] › keybind.test.ts:16:3 › arrow keybinds › meta arrow up/down goes to first and last item 
+    [chrome] › keybind.test.ts:50:3 › vim jk keybinds › meta ctrl j/k goes to first and last item ==
+    [chrome] › keybind.test.ts:84:3 › vim np keybinds › meta ctrl n/p goes to first and last item ==
+  6 passed (24s)

@@ -1,0 +1,11 @@
+
+Running 2 tests using 1 worker
+
+[WebServer] Browserslist: caniuse-lite is outdated. Please run:
+  npx browserslist@latest --update-db
+  Why you should do it regularly: https://github.com/browserslist/browserslist#browsers-data-updating
+[32m  ✓  [39m[90m[chrome] › group.test.js:9:3 › group › groups are shown/hidden based on item matches[39m[2m (759ms)[22m
+[32m  ✓  [39m[90m[chrome] › group.test.js:15:3 › group › group can be progressively rendered[39m[2m (485ms)[22m
+
+
+[32m  2 passed[39m[2m (4s)[22m

@@ -4,6 +4,7 @@ import { join, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import type { ModelMessage } from 'ai';
 import { executeWorker } from './worker-client.js';
+import { WorkerExecutionError } from './worker-error.js';
 import { captureConfig, resolveConfig, type ConfigSnapshot } from './config.js';
 import { EventEmitter } from 'node:events';
 import { redact, redactStream, collectSecrets, partialText, partialReasoning, type AgentEvent, type ExecutionEvent } from './events.js';
@@ -412,6 +413,9 @@ export class Runtime {
       session.messages = redact(resultMessages, secrets);
       run.status = controller.signal.aborted ? 'cancelled' : 'completed';
     } catch (error) {
+      if (error instanceof WorkerExecutionError && error.messages) {
+        session.messages = redact(error.messages, secrets);
+      }
       run.status = controller.signal.aborted ? 'cancelled' : 'failed';
       run.error = redact(error instanceof Error ? error.message : String(error), secrets);
     }

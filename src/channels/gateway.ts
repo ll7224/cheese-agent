@@ -2,6 +2,7 @@ import type { ModelMessage } from 'ai';
 import type { ChannelDefinition, IncomingMessage, OutgoingMessage } from './types.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { executeAgent as agentLoop } from '../runtime/execution.js';
+import type { ExecutionOptions } from '../runtime/events.js';
 
 /**
  * 网关构造参数选项
@@ -13,6 +14,7 @@ interface LegacyGatewayOptions {
   registry: ToolRegistry;
   /** 动态构建系统 Prompt 的回调函数 */
   buildSystem: () => string;
+  executionOptions?: ExecutionOptions;
 }
 
 type GatewayOptions = LegacyGatewayOptions | { run: (channelName: string, message: IncomingMessage) => Promise<string> };
@@ -115,6 +117,8 @@ export class ChannelGateway {
       this.options.registry,
       messages,
       system,
+      undefined,
+      this.options.executionOptions,
     );
 
     // 6. 从更新后的历史记录末尾提取最终的 Assistant 文本回复

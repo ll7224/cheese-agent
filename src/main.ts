@@ -83,6 +83,7 @@ import type { ExecutionOptions } from './runtime/events.js';
 // ── 1. 加载配置与初始化大语言模型 (Model Factory) ────────────────
 const config: SuperAgentConfig = process.env.CHEESE_RUNTIME_CONFIG ? JSON.parse(process.env.CHEESE_RUNTIME_CONFIG) : loadConfig();
 const model = getModel(config.model);
+const executionOptions: ExecutionOptions = { tokenBudget: config.execution?.tokenBudget };
 
 // ── 2. 工具注册中心 (Tool Registry) ──────────────────────────────
 const registry = new ToolRegistry();
@@ -230,6 +231,7 @@ function getSpawnCtx(): SpawnContext {
     agentRegistry,
     buildSystem: () => builder.build(makePromptCtx()),
     currentDepth: 0,
+    ...executionOptions,
   };
 }
 
@@ -261,6 +263,7 @@ const gateway = new ChannelGateway({
   model,
   registry,
   buildSystem: () => builder.build(makePromptCtx()),
+  executionOptions,
 });
 
 const FEISHU_PORT = Number(process.env.FEISHU_PORT || '3000');
@@ -328,7 +331,7 @@ export async function startAgent() {
     runAgentPrompt: async (prompt, timeout) => {
       const cronMessages: ModelMessage[] = [{ role: 'user', content: prompt }];
       const system = builder.build(makePromptCtx());
-      await agentLoop(model, registry, cronMessages, system);
+      await agentLoop(model, registry, cronMessages, system, undefined, executionOptions);
       const lastMsg = cronMessages[cronMessages.length - 1];
       if (!lastMsg) return '(无输出)';
       if (typeof lastMsg.content === 'string') return lastMsg.content;
@@ -376,6 +379,7 @@ export async function startAgent() {
         messages, timestamps, registry, builder, tracker,
         sessionStore: store, model, makePromptCtx, ask,
         memoryStore,
+        executionOptions,
         get vectorStore() {
           return getLegacyRag(config.rag.enabled);
         },
@@ -395,7 +399,11 @@ export async function startAgent() {
       const beforeLen = messages.length;
 
       // 启动 Agent 循环
-      await agentLoop(model, registry, messages, currentSystem, tracker);
+      try {
+        await agentLoop(model, registry, messages, currentSystem, tracker, executionOptions);
+      } catch (error) {
+        console.warn(`\n${error instanceof Error ? error.message : String(error)}`);
+      }
 
       // 会话持久化与状态更新
       const newMessages = messages.slice(beforeLen);
@@ -452,6 +460,7 @@ export async function startAgent() {
 }
 
 export async function runTask(messages: ModelMessage[], options: ExecutionOptions = {}) {
+  options = { ...executionOptions, ...options };
   await connectMCP();
   skillLoader.load();
 

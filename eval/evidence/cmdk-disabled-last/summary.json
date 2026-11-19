@@ -1,0 +1,68 @@
+{
+  "taskId": "cmdk-disabled-last",
+  "date": "2026-10-16",
+  "stage": "M0 sample calibration",
+  "sourceRevision": "9fae175d9bc993d0f72275388429ac0825a72108",
+  "environment": {
+    "os": "macOS 26.5",
+    "node": "16.20.2",
+    "pnpm": "7.9.0",
+    "playwright": "1.24.1",
+    "browser": "Chrome 155.0.8059.82",
+    "next": "12.1.6",
+    "react": "18.2.0"
+  },
+  "upstreamSuite": {
+    "baseline": {
+      "passed": 6,
+      "failed": 3,
+      "exitCode": 1,
+      "log": "upstream-baseline.txt"
+    },
+    "reference": {
+      "passed": 9,
+      "failed": 0,
+      "exitCode": 0,
+      "log": "upstream-reference.txt"
+    }
+  },
+  "externalJudge": {
+    "baseline": {
+      "passed": 6,
+      "failed": 3,
+      "exitCode": 1,
+      "log": "judge-baseline.txt"
+    },
+    "referenceFirst": {
+      "passed": 8,
+      "failed": 1,
+      "exitCode": 1,
+      "failurePhase": "beforeEach page load timeout",
+      "failedTest": "alt ctrl n/p goes to next and prev item",
+      "log": "judge-reference-first.txt"
+    },
+    "referenceTargetedRerun": {
+      "passed": 1,
+      "failed": 0,
+      "exitCode": 0,
+      "log": "judge-reference-rerun.txt"
+    },
+    "referenceConsolidated": {
+      "distinctTestsPassed": 9,
+      "remainingFailures": 0,
+      "firstAttemptEnvironmentFailures": 1
+    }
+  },
+  "assertionsUnchanged": true,
+  "libraryBuilds": {
+    "baseline": "passed",
+    "reference": "passed",
+    "preparedAgentWorkspace": "passed"
+  },
+  "setupAdjustments": [
+    "Node 24 + pnpm 7.9.0 failed with ERR_INVALID_THIS; used temporary Node 16.20.2.",
+    "WebKit 16.0 closed on newPage on this macOS host; used installed Chrome explicitly.",
+    "External test copy uses .js with local CommonJS package scope; test assertions unchanged."
+  ],
+  "cheeseAgentRun": null
+}

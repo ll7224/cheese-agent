@@ -188,7 +188,10 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
   app.route('', createKnowledgeRoutes(runtime));
   app.all('/api/*', context => context.json({ error: '接口不存在' }, 404));
 
-  const knowledgeStaticFiles: Record<string, { path: string; mime: string }> = {
+  const staticFiles: Record<string, { path: string; mime: string }> = {
+    '/code-highlight.js': { path: '../../web/code-highlight.js', mime: 'text/javascript' },
+    '/run-outcome.js': { path: '../../web/run-outcome.js', mime: 'text/javascript' },
+    '/run-outcome.css': { path: '../../web/run-outcome.css', mime: 'text/css' },
     '/knowledge/controller.js': { path: '../../web/knowledge/controller.js', mime: 'text/javascript' },
     '/knowledge/views.js': { path: '../../web/knowledge/views.js', mime: 'text/javascript' },
     '/knowledge/citations.js': { path: '../../web/knowledge/citations.js', mime: 'text/javascript' },
@@ -196,7 +199,7 @@ export function createApp(runtime: Runtime, chooseDirectory: () => Promise<strin
     '/knowledge/style.css': { path: '../../web/knowledge/style.css', mime: 'text/css' },
   };
 
-  for (const [routePath, config] of Object.entries(knowledgeStaticFiles)) {
+  for (const [routePath, config] of Object.entries(staticFiles)) {
     app.get(routePath, context => {
       try {
         const content = readFileSync(new URL(config.path, import.meta.url), 'utf8');

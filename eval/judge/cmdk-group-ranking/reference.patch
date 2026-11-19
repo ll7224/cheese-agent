@@ -1,0 +1,32 @@
+--- a/cmdk/src/index.tsx
++++ b/cmdk/src/index.tsx
+@@ -240,10 +240,12 @@
+           ids.current.delete(id)
+           allItems.current.delete(id)
+           state.current.filtered.items.delete(id)
++          if (groupId) allGroups.current.get(groupId)?.delete(id)
+ 
+           // Batch this, multiple items could be removed in one pass
+           schedule(4, () => {
+             filterItems()
++            sort()
+ 
+             // The item removed could have been the selected one,
+             // so selection should be moved to the first
+@@ -333,7 +335,7 @@
+     groups
+       .sort((a, b) => b[1] - a[1])
+       .forEach((group) => {
+-        const element = ref.current.querySelector(`${GROUP_SELECTOR}[${VALUE_ATTR}="${group[0]}"]`)
++        const element = ref.current.querySelector(`${GROUP_SELECTOR}[data-cmdk-group-id="${group[0]}"]`)
+         element?.parentElement.appendChild(element)
+       })
+   }
+@@ -634,6 +636,7 @@
+       ref={mergeRefs([ref, forwardedRef])}
+       {...etc}
+       cmdk-group=""
++      data-cmdk-group-id={id}
+       role="presentation"
+       hidden={render ? undefined : true}
+     >

@@ -1,0 +1,165 @@
+
+> cmdk-root@ build <candidate-workspace>
+> pnpm -F cmdk build
+
+
+> cmdk@0.1.19 build <candidate-workspace>/cmdk
+> tsup src
+
+CLI Building entry: src/index.tsx
+CLI Using tsconfig: ../tsconfig.json
+CLI tsup v6.2.1
+CLI Using tsup config: <candidate-workspace>/cmdk/tsup.config.ts
+CLI Target: node14
+ESM Build start
+CJS Build start
+ESM ⚡️ Build success in 8ms
+CJS ⚡️ Build success in 6ms
+CJS dist/index.js 9.78 KB
+ESM dist/index.mjs 9.13 KB
+DTS Build start
+DTS ⚡️ Build success in 1561ms
+DTS dist/index.d.ts 4.70 KB
+
+Running 15 tests using 1 worker
+
+[32m  ✓  [39m[90m[chrome] › dynamic-groups.test.ts:7:1 › initial search ranks groups by their best matching item[39m[2m (718ms)[22m
+[31m  ✘  [39m[31m[chrome] › dynamic-groups.test.ts:13:1 › changing search reorders intact groups by their best matching item[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › dynamic-groups.test.ts:20:1 › removing an item before searching does not corrupt later group ranking[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › dynamic-groups.test.ts:28:1 › active search updates group order and selection when items are removed and restored[39m[2m (5s)[22m
+[32m  ✓  [39m[90m[chrome] › group.test.ts:8:3 › group › groups are shown/hidden based on item matches[39m[2m (739ms)[22m
+[32m  ✓  [39m[90m[chrome] › group.test.ts:14:3 › group › group can be progressively rendered[39m[2m (503ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:8:3 › arrow keybinds › arrow up/down changes selected item[39m[2m (566ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:16:3 › arrow keybinds › meta arrow up/down goes to first and last item[39m[2m (498ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:24:3 › arrow keybinds › alt arrow up/down goes to next and prev item[39m[2m (484ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:42:3 › vim jk keybinds › ctrl j/k changes selected item[39m[2m (461ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:50:3 › vim jk keybinds › meta ctrl j/k goes to first and last item[39m[2m (466ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:58:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item[39m[2m (496ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:76:3 › vim np keybinds › ctrl n/p changes selected item[39m[2m (524ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:84:3 › vim np keybinds › meta ctrl n/p goes to first and last item[39m[2m (484ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:92:3 › vim np keybinds › alt ctrl n/p goes to next and prev item[39m[2m (482ms)[22m
+
+
+[31m  1) [chrome] › dynamic-groups.test.ts:13:1 › changing search reorders intact groups by their best matching item [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveText[2m([22m[32mexpected[39m[2m) // deep equality[22m
+
+    [32m- Expected  - 1[39m
+    [31m+ Received  + 1[39m
+
+    [2m  Array [[22m
+    [32m-   "Actions",[39m
+    [2m    "Projects",[22m
+    [31m+   "Actions",[39m
+    [2m  ][22m
+    Call log:
+      [2m- expect.toHaveText with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-group]:not([hidden]) [cmdk-group-heading]"[22m
+    [2m  -   selector resolved to 2 elements[22m
+
+
+      13 | test('changing search reorders intact groups by their best matching item', async ({ page }) => {
+      14 |   await page.locator('[cmdk-input]').fill('actions-first')
+    > 15 |   await expect(headings(page)).toHaveText(['Actions', 'Projects'])
+         |                                ^
+      16 |   await page.locator('[cmdk-input]').fill('rank')
+      17 |   await expect(headings(page)).toHaveText(['Projects', 'Actions'])
+      18 | })
+
+    [2m    at <candidate-workspace>/test/dynamic-groups.test.ts:15:32[22m
+
+    Pending operations:
+      - expect.toHaveText at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/matchers/toEqual.js:41:62
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/agent/dynamic-groups-changing-search-reorders-intact-groups-by-their-best-matching-item-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  2) [chrome] › dynamic-groups.test.ts:20:1 › removing an item before searching does not corrupt later group ranking [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveText[2m([22m[32mexpected[39m[2m) // deep equality[22m
+
+    [32m- Expected  - 1[39m
+    [31m+ Received  + 1[39m
+
+    [2m  Array [[22m
+    [32m-   "Actions",[39m
+    [2m    "Projects",[22m
+    [31m+   "Actions",[39m
+    [2m  ][22m
+    Call log:
+      [2m- expect.toHaveText with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-group]:not([hidden]) [cmdk-group-heading]"[22m
+    [2m  -   selector resolved to 2 elements[22m
+
+
+      22 |   await expect(page.locator('[cmdk-item][data-value="temporary"]')).toHaveCount(0)
+      23 |   await page.locator('[cmdk-input]').fill('rank')
+    > 24 |   await expect(headings(page)).toHaveText(['Actions', 'Projects'])
+         |                                ^
+      25 |   await expect(page.locator('[cmdk-item]')).toHaveCount(2)
+      26 | })
+      27 |
+
+    [2m    at <candidate-workspace>/test/dynamic-groups.test.ts:24:32[22m
+
+    Pending operations:
+      - expect.toHaveText at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/matchers/toEqual.js:41:62
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/agent/dynamic-groups-removing-an-item-before-searching-does-not-corrupt-later-group-ranking-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  3) [chrome] › dynamic-groups.test.ts:28:1 › active search updates group order and selection when items are removed and restored [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveText[2m([22m[32mexpected[39m[2m) // deep equality[22m
+
+    [32m- Expected  - 1[39m
+    [31m+ Received  + 1[39m
+
+    [2m  Array [[22m
+    [32m-   "Actions",[39m
+    [2m    "Projects",[22m
+    [31m+   "Actions",[39m
+    [2m  ][22m
+    Call log:
+      [2m- expect.toHaveText with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-group]:not([hidden]) [cmdk-group-heading]"[22m
+    [2m  -   selector resolved to 2 elements[22m
+
+
+      31 |   await page.locator('button', { hasText: 'Remove temporary item' }).click()
+      32 |   await expect(page.locator('[cmdk-item][data-value="temporary"]')).toHaveCount(0)
+    > 33 |   await expect(headings(page)).toHaveText(['Actions', 'Projects'])
+         |                                ^
+      34 |   await expect(page.locator('[cmdk-item][aria-selected="true"]')).toHaveAttribute('data-value', 'action')
+      35 |   await page.locator('button', { hasText: 'Add temporary item' }).click()
+      36 |   await expect(headings(page)).toHaveText(['Projects', 'Actions'])
+
+    [2m    at <candidate-workspace>/test/dynamic-groups.test.ts:33:32[22m
+
+    Pending operations:
+      - expect.toHaveText at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/matchers/toEqual.js:41:62
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/agent/dynamic-groups-active-search-updates-group-order-and-selection-when-items-are-removed-and-restored-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[33m  Slow test file: [39m[chrome] › dynamic-groups.test.ts[33m (16s)[39m
+[33m  Consider splitting slow test files to speed up parallel execution[39m
+
+[31m  3 failed[39m
+[31m    [chrome] › dynamic-groups.test.ts:13:1 › changing search reorders intact groups by their best matching item [39m
+[31m    [chrome] › dynamic-groups.test.ts:20:1 › removing an item before searching does not corrupt later group ranking [39m
+[31m    [chrome] › dynamic-groups.test.ts:28:1 › active search updates group order and selection when items are removed and restored [39m
+[32m  12 passed[39m[2m (26s)[22m
+

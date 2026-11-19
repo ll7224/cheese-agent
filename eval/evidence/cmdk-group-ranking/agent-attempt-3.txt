@@ -1,0 +1,44 @@
+
+> cmdk-root@ build <candidate-workspace>
+> pnpm -F cmdk build
+
+
+> cmdk@0.1.19 build <candidate-workspace>/cmdk
+> tsup src
+
+CLI Building entry: src/index.tsx
+CLI Using tsconfig: ../tsconfig.json
+CLI tsup v6.2.1
+CLI Using tsup config: <candidate-workspace>/cmdk/tsup.config.ts
+CLI Target: node14
+ESM Build start
+CJS Build start
+ESM ⚡️ Build success in 6ms
+CJS ⚡️ Build success in 5ms
+CJS dist/index.js 9.99 KB
+ESM dist/index.mjs 9.34 KB
+DTS Build start
+DTS ⚡️ Build success in 922ms
+DTS dist/index.d.ts 4.70 KB
+
+Running 15 tests using 1 worker
+
+[32m  ✓  [39m[90m[chrome] › dynamic-groups.test.ts:7:1 › initial search ranks groups by their best matching item[39m[2m (652ms)[22m
+[32m  ✓  [39m[90m[chrome] › dynamic-groups.test.ts:13:1 › changing search reorders intact groups by their best matching item[39m[2m (416ms)[22m
+[32m  ✓  [39m[90m[chrome] › dynamic-groups.test.ts:20:1 › removing an item before searching does not corrupt later group ranking[39m[2m (437ms)[22m
+[32m  ✓  [39m[90m[chrome] › dynamic-groups.test.ts:28:1 › active search updates group order and selection when items are removed and restored[39m[2m (505ms)[22m
+[32m  ✓  [39m[90m[chrome] › group.test.ts:8:3 › group › groups are shown/hidden based on item matches[39m[2m (500ms)[22m
+[32m  ✓  [39m[90m[chrome] › group.test.ts:14:3 › group › group can be progressively rendered[39m[2m (398ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:8:3 › arrow keybinds › arrow up/down changes selected item[39m[2m (481ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:16:3 › arrow keybinds › meta arrow up/down goes to first and last item[39m[2m (404ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:24:3 › arrow keybinds › alt arrow up/down goes to next and prev item[39m[2m (439ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:42:3 › vim jk keybinds › ctrl j/k changes selected item[39m[2m (409ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:50:3 › vim jk keybinds › meta ctrl j/k goes to first and last item[39m[2m (410ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:58:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item[39m[2m (433ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:76:3 › vim np keybinds › ctrl n/p changes selected item[39m[2m (403ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:84:3 › vim np keybinds › meta ctrl n/p goes to first and last item[39m[2m (410ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:92:3 › vim np keybinds › alt ctrl n/p goes to next and prev item[39m[2m (425ms)[22m
+
+
+[32m  15 passed[39m[2m (9s)[22m
+

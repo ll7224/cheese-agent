@@ -1,0 +1,24 @@
+
+Running 15 tests using 1 worker
+
+[WebServer] Browserslist: caniuse-lite is outdated. Please run:
+  npx browserslist@latest --update-db
+  Why you should do it regularly: https://github.com/browserslist/browserslist#browsers-data-updating
+[32m  ✓  [39m[90m[chrome] › dynamic-groups.test.js:7:1 › initial search ranks groups by their best matching item[39m[2m (989ms)[22m
+[32m  ✓  [39m[90m[chrome] › dynamic-groups.test.js:13:1 › changing search reorders intact groups by their best matching item[39m[2m (457ms)[22m
+[32m  ✓  [39m[90m[chrome] › dynamic-groups.test.js:20:1 › removing an item before searching does not corrupt later group ranking[39m[2m (507ms)[22m
+[32m  ✓  [39m[90m[chrome] › dynamic-groups.test.js:28:1 › active search updates group order and selection when items are removed and restored[39m[2m (536ms)[22m
+[32m  ✓  [39m[90m[chrome] › group.test.js:9:3 › group › groups are shown/hidden based on item matches[39m[2m (506ms)[22m
+[32m  ✓  [39m[90m[chrome] › group.test.js:15:3 › group › group can be progressively rendered[39m[2m (443ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.js:11:3 › arrow keybinds › arrow up/down changes selected item[39m[2m (484ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.js:19:3 › arrow keybinds › meta arrow up/down goes to first and last item[39m[2m (419ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.js:27:3 › arrow keybinds › alt arrow up/down goes to next and prev item[39m[2m (433ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.js:45:3 › vim jk keybinds › ctrl j/k changes selected item[39m[2m (445ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.js:53:3 › vim jk keybinds › meta ctrl j/k goes to first and last item[39m[2m (452ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.js:61:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item[39m[2m (449ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.js:79:3 › vim np keybinds › ctrl n/p changes selected item[39m[2m (449ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.js:87:3 › vim np keybinds › meta ctrl n/p goes to first and last item[39m[2m (455ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.js:95:3 › vim np keybinds › alt ctrl n/p goes to next and prev item[39m[2m (463ms)[22m
+
+
+[32m  15 passed[39m[2m (11s)[22m

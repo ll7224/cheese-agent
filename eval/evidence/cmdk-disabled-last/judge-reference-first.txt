@@ -1,0 +1,37 @@
+
+Running 9 tests using 1 worker
+
+[WebServer] Browserslist: caniuse-lite is outdated. Please run:
+  npx browserslist@latest --update-db
+  Why you should do it regularly: https://github.com/browserslist/browserslist#browsers-data-updating
+  ✓  [chrome] › keybind.test.js:11:3 › arrow keybinds › arrow up/down changes selected item (597ms)
+  ✓  [chrome] › keybind.test.js:19:3 › arrow keybinds › meta arrow up/down goes to first and last item (503ms)
+  ✓  [chrome] › keybind.test.js:27:3 › arrow keybinds › alt arrow up/down goes to next and prev item (520ms)
+  ✓  [chrome] › keybind.test.js:45:3 › vim jk keybinds › ctrl j/k changes selected item (599ms)
+  ✓  [chrome] › keybind.test.js:53:3 › vim jk keybinds › meta ctrl j/k goes to first and last item (1s)
+  ✓  [chrome] › keybind.test.js:61:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item (2s)
+  ✓  [chrome] › keybind.test.js:79:3 › vim np keybinds › ctrl n/p changes selected item (469ms)
+  ✓  [chrome] › keybind.test.js:87:3 › vim np keybinds › meta ctrl n/p goes to first and last item (427ms)
+  ✘  [chrome] › keybind.test.js:95:3 › vim np keybinds › alt ctrl n/p goes to next and prev item (1m)
+
+
+  1) [chrome] › keybind.test.js:95:3 › vim np keybinds › alt ctrl n/p goes to next and prev item ===
+
+    Test timeout of 5000ms exceeded while running "beforeEach" hook.
+
+      73 |
+      74 | test.describe('vim np keybinds', async () => {
+    > 75 |   test.beforeEach(async ({ page }) => {
+         |        ^
+      76 |     await page.goto('/keybinds')
+      77 |   })
+      78 |
+
+        at $CHEESE_REPO/eval/judge/cmdk-disabled-last/keybind.test.js:75:8
+
+  Slow test file: [chrome] › keybind.test.js (1m)
+  Consider splitting slow test files to speed up parallel execution
+
+  1 failed
+    [chrome] › keybind.test.js:95:3 › vim np keybinds › alt ctrl n/p goes to next and prev item ====
+  8 passed (1m)

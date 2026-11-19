@@ -1,0 +1,19 @@
+{
+  "stage": "M1 first candidate, independently checked after budget stop",
+  "verifiedDate": "2026-10-17",
+  "runStatus": "failed",
+  "stopReason": "token-budget",
+  "observedUsage": { "input": 521097, "output": 9681, "total": 530778, "steps": 14 },
+  "patchOrigin": "Second Cheese run, edit_file tool result recorded at step 4",
+  "candidatePatch": "candidate.patch",
+  "build": { "exitCode": 0, "log": "candidate-build.txt" },
+  "upstreamTestsWithNeutralChromeRunner": { "passed": 9, "failed": 0, "exitCode": 0, "log": "candidate-neutral-runner.txt" },
+  "fixedExternalJudge": { "passed": 9, "failed": 0, "exitCode": 0, "log": "candidate-fixed-judge.txt" },
+  "integrityCheck": "Compared all upstream files with the frozen source archive: only the candidate's one-line cmdk/src/index.tsx edit and the pre-existing disabled-item page fixture differ. Original test assertions and build config are unchanged. Judge ran against the existing candidate workspace, not a fresh replica.",
+  "humanAssistance": [
+    "User asked Cheese to investigate the interruption after the first tool-only run.",
+    "Host supplied an isolated Chrome runner and performed final validation after the failed run."
+  ],
+  "autonomousEndToEndSuccess": false,
+  "newPaidModelRequestsForThisVerification": 0
+}

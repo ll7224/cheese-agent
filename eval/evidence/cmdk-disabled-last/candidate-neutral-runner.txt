@@ -1,0 +1,18 @@
+
+Running 9 tests using 1 worker
+
+[WebServer] Browserslist: caniuse-lite is outdated. Please run:
+  npx browserslist@latest --update-db
+  Why you should do it regularly: https://github.com/browserslist/browserslist#browsers-data-updating
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:8:3 › arrow keybinds › arrow up/down changes selected item[39m[2m (575ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:16:3 › arrow keybinds › meta arrow up/down goes to first and last item[39m[2m (511ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:24:3 › arrow keybinds › alt arrow up/down goes to next and prev item[39m[2m (487ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:42:3 › vim jk keybinds › ctrl j/k changes selected item[39m[2m (719ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:50:3 › vim jk keybinds › meta ctrl j/k goes to first and last item[39m[2m (443ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:58:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item[39m[2m (446ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:76:3 › vim np keybinds › ctrl n/p changes selected item[39m[2m (439ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:84:3 › vim np keybinds › meta ctrl n/p goes to first and last item[39m[2m (454ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:92:3 › vim np keybinds › alt ctrl n/p goes to next and prev item[39m[2m (456ms)[22m
+
+
+[32m  9 passed[39m[2m (7s)[22m

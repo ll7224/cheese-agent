@@ -1,0 +1,76 @@
+--- /dev/null
++++ b/test/pages/dynamic-groups.tsx
+@@ -0,0 +1,32 @@
++import { Command } from 'cmdk'
++import * as React from 'react'
++
++const scores = { temporary: 1, project: 0.2, action: 0.8 }
++
++export default function DynamicGroups() {
++  const [temporary, setTemporary] = React.useState(true)
++  return (
++    <div>
++      <button onClick={() => setTemporary((value) => !value)}>
++        {temporary ? 'Remove temporary item' : 'Add temporary item'}
++      </button>
++      <Command filter={(value, search) => {
++        if (!search) return 1
++        if (search === 'actions-first' && value === 'temporary') return 0.1
++        return scores[value] || 0
++      }}>
++        <Command.Input placeholder="Search ranking" />
++        <Command.List>
++          <Command.Empty>No results.</Command.Empty>
++          <Command.Group heading="Projects">
++            {temporary && <Command.Item value="temporary">Temporary project</Command.Item>}
++            <Command.Item value="project">Project</Command.Item>
++          </Command.Group>
++          <Command.Group heading="Actions">
++            <Command.Item value="action">Action</Command.Item>
++          </Command.Group>
++        </Command.List>
++      </Command>
++    </div>
++  )
++}
+--- /dev/null
++++ b/test/dynamic-groups.test.ts
+@@ -0,0 +1,38 @@
++import { expect, test } from '@playwright/test'
++
++test.beforeEach(async ({ page }) => { await page.goto('/dynamic-groups') })
++
++const headings = (page) => page.locator('[cmdk-group]:not([hidden]) [cmdk-group-heading]')
++
++test('initial search ranks groups by their best matching item', async ({ page }) => {
++  await page.locator('[cmdk-input]').fill('rank')
++  await expect(headings(page)).toHaveText(['Projects', 'Actions'])
++  await expect(page.locator('[cmdk-item]')).toHaveCount(3)
++})
++
++test('changing search reorders intact groups by their best matching item', async ({ page }) => {
++  await page.locator('[cmdk-input]').fill('actions-first')
++  await expect(headings(page)).toHaveText(['Actions', 'Projects'])
++  await page.locator('[cmdk-input]').fill('rank')
++  await expect(headings(page)).toHaveText(['Projects', 'Actions'])
++})
++
++test('removing an item before searching does not corrupt later group ranking', async ({ page }) => {
++  await page.locator('button', { hasText: 'Remove temporary item' }).click()
++  await expect(page.locator('[cmdk-item][data-value="temporary"]')).toHaveCount(0)
++  await page.locator('[cmdk-input]').fill('rank')
++  await expect(headings(page)).toHaveText(['Actions', 'Projects'])
++  await expect(page.locator('[cmdk-item]')).toHaveCount(2)
++})
++
++test('active search updates group order and selection when items are removed and restored', async ({ page }) => {
++  await page.locator('[cmdk-input]').fill('rank')
++  await expect(headings(page)).toHaveText(['Projects', 'Actions'])
++  await page.locator('button', { hasText: 'Remove temporary item' }).click()
++  await expect(page.locator('[cmdk-item][data-value="temporary"]')).toHaveCount(0)
++  await expect(headings(page)).toHaveText(['Actions', 'Projects'])
++  await expect(page.locator('[cmdk-item][aria-selected="true"]')).toHaveAttribute('data-value', 'action')
++  await page.locator('button', { hasText: 'Add temporary item' }).click()
++  await expect(headings(page)).toHaveText(['Projects', 'Actions'])
++  await expect(page.locator('[cmdk-item]')).toHaveCount(3)
++})

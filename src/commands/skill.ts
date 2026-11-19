@@ -95,7 +95,9 @@ export function createSkillCommands(skillLoader: SkillLoader, activeSkills: Set<
       const beforeLen = ctx.messages.length;
 
       // 启动 Agent 执行主循环
-      agentLoop(ctx.model, ctx.registry, ctx.messages, currentSystem, ctx.tracker).then(() => {
+      agentLoop(ctx.model, ctx.registry, ctx.messages, currentSystem, ctx.tracker, ctx.executionOptions)
+        .catch(error => { console.error(`\n${error instanceof Error ? error.message : String(error)}`); })
+        .finally(() => {
         const newMessages = ctx.messages.slice(beforeLen);
         const now = Date.now();
         for (let i = beforeLen; i < ctx.messages.length; i++) ctx.timestamps.set(i, now);

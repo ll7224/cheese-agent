@@ -1,0 +1,22 @@
+
+Running 16 tests using 1 worker
+
+  ✓  [chrome] › duplicate-groups.test.js:3:1 › groups with identical headings keep independent identity when sorting (620ms)
+  ✓  [chrome] › dynamic-groups.test.js:7:1 › initial search ranks groups by their best matching item (532ms)
+  ✓  [chrome] › dynamic-groups.test.js:13:1 › changing search reorders intact groups by their best matching item (444ms)
+  ✓  [chrome] › dynamic-groups.test.js:20:1 › removing an item before searching does not corrupt later group ranking (502ms)
+  ✓  [chrome] › dynamic-groups.test.js:28:1 › active search updates group order and selection when items are removed and restored (519ms)
+  ✓  [chrome] › group.test.js:9:3 › group › groups are shown/hidden based on item matches (493ms)
+  ✓  [chrome] › group.test.js:15:3 › group › group can be progressively rendered (448ms)
+  ✓  [chrome] › keybind.test.js:11:3 › arrow keybinds › arrow up/down changes selected item (487ms)
+  ✓  [chrome] › keybind.test.js:19:3 › arrow keybinds › meta arrow up/down goes to first and last item (421ms)
+  ✓  [chrome] › keybind.test.js:27:3 › arrow keybinds › alt arrow up/down goes to next and prev item (435ms)
+  ✓  [chrome] › keybind.test.js:45:3 › vim jk keybinds › ctrl j/k changes selected item (450ms)
+  ✓  [chrome] › keybind.test.js:53:3 › vim jk keybinds › meta ctrl j/k goes to first and last item (440ms)
+  ✓  [chrome] › keybind.test.js:61:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item (466ms)
+  ✓  [chrome] › keybind.test.js:79:3 › vim np keybinds › ctrl n/p changes selected item (423ms)
+  ✓  [chrome] › keybind.test.js:87:3 › vim np keybinds › meta ctrl n/p goes to first and last item (433ms)
+  ✓  [chrome] › keybind.test.js:95:3 › vim np keybinds › alt ctrl n/p goes to next and prev item (441ms)
+
+
+  16 passed (11s)

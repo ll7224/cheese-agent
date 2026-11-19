@@ -1,0 +1,22 @@
+
+> cmdk-root@ build <candidate-workspace>
+> pnpm -F cmdk build
+
+
+> cmdk@0.1.19 build <candidate-workspace>/cmdk
+> tsup src
+
+CLI Building entry: src/index.tsx
+CLI Using tsconfig: ../tsconfig.json
+CLI tsup v6.2.1
+CLI Using tsup config: <candidate-workspace>/cmdk/tsup.config.ts
+CLI Target: node14
+ESM Build start
+CJS Build start
+ESM ⚡️ Build success in 7ms
+CJS ⚡️ Build success in 6ms
+CJS dist/index.js 9.77 KB
+ESM dist/index.mjs 9.12 KB
+DTS Build start
+DTS ⚡️ Build success in 1062ms
+DTS dist/index.d.ts 4.70 KB

@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "tasks": [
+    {
+      "id": "cmdk-disabled-last",
+      "title": "命令菜单含禁用项时无法跳到最后一个可用项",
+      "split": "development",
+      "origin": "historical-bug",
+      "status": "patch-verified-delivery-smoke-passed",
+      "sourceUrl": "https://github.com/dip/cmdk",
+      "revision": "9fae175d9bc993d0f72275388429ac0825a72108",
+      "license": "MIT",
+      "promptFile": "eval/cases/cmdk-disabled-last/TASK.md",
+      "fixturePatch": "eval/cases/cmdk-disabled-last/fixture.patch",
+      "allowedChanges": [
+        "cmdk/src/"
+      ],
+      "toolchain": {
+        "node": "16.20.2",
+        "pnpm": "7.9.0",
+        "playwright": "1.24.1",
+        "browser": "installed Chrome",
+        "verifiedBrowserVersion": "155.0.8059.82",
+        "verifiedOS": "macOS 26.5"
+      },
+      "setupCommand": "pnpm install --frozen-lockfile --ignore-scripts --filter cmdk-root --filter cmdk --filter cmdk-tests && pnpm run build",
+      "acceptanceCommand": "pnpm run build && NEXT_TELEMETRY_DISABLED=1 pnpm exec playwright test --config=\"$CHEESE_REPO/eval/judge/cmdk-disabled-last/playwright.config.cjs\"",
+      "regressionCoveredBy": "acceptanceCommand",
+      "commandWorkingDirectory": "prepared cmdk workspace; fixture already applied",
+      "requiredEnvironment": [
+        "CHEESE_REPO",
+        "CHEESE_CASE_OUTPUT"
+      ],
+      "timeoutMs": 180000,
+      "maxSteps": 20,
+      "judgeOnly": {
+        "sourcePr": "https://github.com/dip/cmdk/pull/47",
+        "finalPrRevision": "0ce9105013bdb33548060a5876dbd866e364a10b",
+        "referencePatch": "eval/judge/cmdk-disabled-last/reference.patch",
+        "tests": "eval/judge/cmdk-disabled-last/keybind.test.js",
+        "baselineExpected": {
+          "passed": 6,
+          "failed": 3,
+          "exitCode": 1
+        },
+        "referenceExpected": {
+          "passed": 9,
+          "failed": 0,
+          "exitCode": 0
+        },
+        "evidence": "eval/evidence/cmdk-disabled-last/summary.json"
+      },
+      "agentInput": "Only promptFile and the prepared buggy workspace; do not pass this manifest, judgeOnly, evidence or PR links to the agent.",
+      "notes": [
+        "Development calibration case; exclude from held-out evaluation.",
+        "The fixture changes only the test page, not the library implementation.",
+        "Independent acceptance includes all nine upstream keybinding assertions and a source-diff review.",
+        "Cheese produced a valid patch but its first repair run stopped at the budget. A subsequent delivery smoke completed with 9/9 keyboard tests; see eval/evidence/cmdk-disabled-last/delivery-smoke.json."
+      ]
+    },
+    {
+      "id": "cmdk-group-ranking",
+      "title": "搜索变化及动态卸载后的分组排序失效",
+      "split": "development",
+      "origin": "existing-source-bug-with-constructed-reproduction",
+      "status": "fixed-task-and-feedback-followup-accepted",
+      "sourceUrl": "https://github.com/dip/cmdk",
+      "revision": "9fae175d9bc993d0f72275388429ac0825a72108",
+      "license": "MIT",
+      "promptFile": "eval/cases/cmdk-group-ranking/TASK.md",
+      "fixturePatch": "eval/cases/cmdk-group-ranking/fixture.patch",
+      "allowedChanges": [
+        "cmdk/src/"
+      ],
+      "toolchain": {
+        "node": "16.20.2",
+        "pnpm": "7.9.0",
+        "playwright": "1.24.1",
+        "browser": "installed Chrome",
+        "verifiedBrowserVersion": "155.0.8059.82",
+        "verifiedOS": "macOS 26.5"
+      },
+      "setupCommand": "pnpm install --offline --frozen-lockfile --ignore-scripts --filter cmdk-root --filter cmdk --filter cmdk-tests && pnpm run build",
+      "acceptanceCommand": "pnpm run build && NEXT_TELEMETRY_DISABLED=1 pnpm exec playwright test --config=\"$CHEESE_REPO/eval/judge/cmdk-group-ranking/playwright.config.cjs\"",
+      "regressionCoveredBy": "acceptanceCommand",
+      "commandWorkingDirectory": "prepared fresh cmdk workspace with additive page/test fixture",
+      "requiredEnvironment": [
+        "CHEESE_REPO",
+        "CHEESE_CASE_OUTPUT",
+        "NODE_OPTIONS=\"\"",
+        "Node16/pnpm7 PATH"
+      ],
+      "timeoutMs": 180000,
+      "bashToolTimeoutMs": 120000,
+      "tokenBudget": 2000000,
+      "judgeOnly": {
+        "referencePatch": "eval/judge/cmdk-group-ranking/reference.patch",
+        "tests": [
+          "dynamic-groups.test.js",
+          "group.test.js",
+          "keybind.test.js"
+        ],
+        "baselineExpected": {
+          "passed": 12,
+          "failed": 3,
+          "exitCode": 1,
+          "batches": 2
+        },
+        "referenceExpected": {
+          "passed": 15,
+          "failed": 0,
+          "exitCode": 0
+        },
+        "evidence": "eval/evidence/cmdk-group-ranking/summary.json"
+      },
+      "agentInput": "Only promptFile and the unfixed workspace; exclude manifest, reference, judge and evidence.",
+      "notes": [
+        "Second development sample; not held out.",
+        "No fault injected into library source.",
+        "Original group and keyboard assertions unchanged.",
+        "Cheese completed one run and passed clean-replica build plus frozen 15/15 acceptance. Additional duplicate-heading probe fails and is tracked separately; see candidate-result.json."
+      ],
+      "followup": {
+        "promptFile": "eval/cases/cmdk-group-ranking/FOLLOWUP.md",
+        "status": "independently-accepted",
+        "split": "development-feedback-iteration",
+        "runId": "a8741e90-e752-4c4c-9e6e-ce1a0787a5c6",
+        "passed": 16,
+        "failed": 0,
+        "evidence": "eval/evidence/cmdk-group-ranking/followup-result.json"
+      }
+    }
+  ]
+}

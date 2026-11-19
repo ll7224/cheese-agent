@@ -54,6 +54,6 @@ process.once('message', async (request: any) => {
     });
     process.send?.({ type: 'result', messages: request.messages }, () => process.exit(0));
   } catch (error) {
-    process.send?.({ type: 'error', error: error instanceof Error ? error.message : String(error) }, () => process.exit(1));
+    process.send?.({ type: 'error', error: error instanceof Error ? error.message : String(error), messages: request.messages }, () => process.exit(1));
   }
 });

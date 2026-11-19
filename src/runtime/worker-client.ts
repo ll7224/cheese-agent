@@ -1,6 +1,7 @@
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { Executor } from './service.js';
+import { WorkerExecutionError } from './worker-error.js';
 
 export const executeWorker: Executor = ({ cwd, messages, config, activeSkills, agentId, emit, acquireChild, manageCron, knowledge, signal }) => new Promise((resolve, reject) => {
   signal?.throwIfAborted();
@@ -10,6 +11,7 @@ export const executeWorker: Executor = ({ cwd, messages, config, activeSkills, a
   });
   let failure = '';
   let result: typeof messages | undefined;
+  let partialMessages: typeof messages | undefined;
   let exited = false;
   const permits = new Map<string, () => void>();
   let terminateTimer: ReturnType<typeof setTimeout> | undefined;
@@ -56,7 +58,10 @@ export const executeWorker: Executor = ({ cwd, messages, config, activeSkills, a
       try { emit?.(message.event); } catch (error) { failure = String(error); worker.kill(); }
     }
     if (message.type === 'result') result = message.messages;
-    if (message.type === 'error') failure = message.error;
+    if (message.type === 'error') {
+      failure = message.error;
+      partialMessages = message.messages;
+    }
   });
   worker.on('error', reject);
   worker.on('exit', code => {
@@ -65,7 +70,7 @@ export const executeWorker: Executor = ({ cwd, messages, config, activeSkills, a
     signal?.removeEventListener('abort', abort);
     kill('SIGKILL');
     permits.forEach(release => release());
-    result && code === 0 ? resolve(result) : reject(new Error(failure || `Agent 进程退出 (${code})`));
+    result && code === 0 ? resolve(result) : reject(new WorkerExecutionError(failure || `Agent 进程退出 (${code})`, partialMessages));
   });
   worker.send({ messages, config, activeSkills, agentId });
 });

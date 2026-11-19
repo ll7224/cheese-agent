@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-17",
+  "taskId": "cmdk-group-ranking",
+  "runId": "22662d4d-4c35-4a43-8308-77f63b35d5df",
+  "sessionId": "eba4fb38-030b-48e4-8b63-5ae5f59cdccb",
+  "runStatus": "completed",
+  "model": "gemini-3.8-flash-high",
+  "steps": 26,
+  "toolCalls": 25,
+  "elapsedMs": 543806,
+  "usage": {
+    "input": 1113339,
+    "output": 53086,
+    "total": 1166425
+  },
+  "usageComplete": true,
+  "userMessages": 1,
+  "agentCommandAttempts": [
+    {
+      "exitCode": 1,
+      "timedOut": false
+    },
+    {
+      "exitCode": 1,
+      "timedOut": false
+    },
+    {
+      "exitCode": 0,
+      "timedOut": false
+    }
+  ],
+  "finalAnswerPresent": true,
+  "independentAcceptance": {
+    "freshReplica": true,
+    "onlyCandidateLibraryPatchCopied": true,
+    "buildPassed": true,
+    "passed": 15,
+    "failed": 0,
+    "log": "candidate-judge.txt"
+  },
+  "scopeCheck": "Only cmdk/src/index.tsx differs from archived original files; supplied fixture page and assertions match frozen copies; original tests, dependencies and build config unchanged.",
+  "residualFinding": {
+    "title": "Duplicate group headings still break sorting",
+    "verified": true,
+    "passed": 0,
+    "failed": 1,
+    "log": "duplicate-groups-probe.txt",
+    "includedInOriginal15": false,
+    "explanation": "Group DOM lookup uses public value derived from heading, which need not be unique. Distinct internal group IDs can resolve to the same DOM match.",
+    "controlReference": {
+      "passed": 1,
+      "failed": 0,
+      "log": "duplicate-groups-control.txt"
+    }
+  },
+  "verdict": "Passed the fixed task acceptance and delivery workflow; retain duplicate-heading limitation as a separate follow-up.",
+  "newModelRequestsForAcceptance": 0
+}

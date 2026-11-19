@@ -140,6 +140,7 @@ export async function runInit() {
     usage: {
       trackingFile: '.usage/today.jsonl',
     },
+    execution: { tokenBudget: 500000 },
   };
 
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + '\n');

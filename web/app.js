@@ -1,5 +1,7 @@
 import { KnowledgeController } from './knowledge/controller.js';
 import { renderMessageCitations } from './knowledge/citations.js';
+import { conversationEntries, currentRunLabel, renderRunOutcome } from './run-outcome.js';
+import { escapeHtml, highlightCode } from './code-highlight.js';
 
 const element = id => document.getElementById(id);
 const labels = { queued: '排队中', running: '运行中', stopping: '正在停止', completed: '已完成', failed: '执行失败', error: '失败', timeout: '已超时', cancelled: '已停止', interrupted: '已中断' };
@@ -51,33 +53,7 @@ const node = (tag, className, text) => {
   return result;
 };
 
-/* --- Lightweight Safe Markdown & Syntax Highlighter --- */
-function escapeHtml(str) {
-  return String(str).replace(/[&<>"']/g, m => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  }[m]));
-}
-
-function highlightCode(code, lang) {
-  let safe = escapeHtml(code);
-  // Comments
-  safe = safe.replace(/(\/\/[^\n]*|#[^\n]*)/g, '<span class="hl-comment">$1</span>');
-  // Strings
-  safe = safe.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/g, '<span class="hl-string">$1</span>');
-  // Numbers
-  safe = safe.replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="hl-number">$1</span>');
-  // Common keywords
-  const keywords = /\b(const|let|var|function|return|import|export|from|default|class|extends|if|else|switch|case|break|try|catch|finally|throw|new|typeof|instanceof|async|await|def|for|in|of|while|do|continue|type|interface|enum|public|private|protected|static|readonly|true|false|null|undefined|None|self)\b/g;
-  safe = safe.replace(keywords, '<span class="hl-keyword">$1</span>');
-  // Function calls
-  safe = safe.replace(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)(?=\s*\()/g, '<span class="hl-function">$1</span>');
-  return safe;
-}
-
+/* --- Lightweight Safe Markdown --- */
 function parseMarkdown(md) {
   if (!md) return '';
   const text = md.replace(/\r\n/g, '\n');
@@ -336,7 +312,7 @@ function renderControls() {
   updateModelCapsuleDisplay();
   renderSkillCapsule();
   renderAgentCapsule();
-  element('run-status').textContent = currentRun ? labels[currentRun.status] || currentRun.status : '准备好开始了';
+  element('run-status').textContent = currentRun ? currentRunLabel(currentSession, currentRun) || labels[currentRun.status] || currentRun.status : '准备好开始了';
 
   const currentAgent = availableAgents.find(a => a.id === (currentSession?.agentId || selectedAgentId)) || { avatar: '🧀', name: 'CHEESE' };
   const liveAvatar = element('live')?.querySelector('.assistant-avatar');
@@ -358,7 +334,7 @@ function messageText(message) {
 }
 
 function renderMessages(session) {
-  const signature = JSON.stringify(session.messages);
+  const signature = JSON.stringify([session.messages, session.runs]);
   if (signature === messagesSignature) return;
   messagesSignature = signature;
   const sessionDefaultModel = session.config?.values?.model?.name || '';
@@ -378,7 +354,9 @@ function renderMessages(session) {
     }
   });
 
-  element('messages').replaceChildren(...session.messages.filter(message => ['user', 'assistant'].includes(message.role) && (messageText(message) || message.reasoning)).map(message => {
+  element('messages').replaceChildren(...conversationEntries(session).map(entry => {
+    if (entry.type === 'outcome') return renderRunOutcome(entry, () => setDetails(true));
+    const message = entry.message;
     const article = node('article', `message ${message.role}`);
     const author = node('div', 'message-author');
     if (message.role === 'user') {
@@ -414,9 +392,7 @@ function renderMessages(session) {
     const content = node('div', `message-content ${message.role === 'assistant' ? 'markdown-body' : ''}`);
     if (message.role === 'assistant') {
       content.innerHTML = parseMarkdown(messageText(message));
-      const assistantIdx = session.messages.slice(0, session.messages.indexOf(message)).filter(m => m.role === 'assistant').length;
-      const matchingRun = (session.runs || [])[assistantIdx];
-      const matchingCitations = matchingRun ? runCitationsMap.get(matchingRun.id) : (assistantIdx === (session.runs || []).length - 1 ? runCitationsMap.get(currentRun?.id) : []);
+      const matchingCitations = runCitationsMap.get(entry.runId);
       if (matchingCitations && matchingCitations.length > 0) {
         renderMessageCitations(content, matchingCitations, workspaceId);
       }
@@ -529,12 +505,13 @@ function renderEvents() {
     detail.dataset.event = event.id;
 
     const summary = node('summary', 'tool-summary');
-    const isError = event.type === 'tool-error' || event.status === 'failed' || event.status === 'error';
+    const isError = event.type === 'tool-error' || event.type === 'execution-stopped' || event.status === 'failed' || event.status === 'error';
     const icon = node('span', 'tool-icon', toolIcon(event.name || event.type));
     const name = node('span', 'tool-name', event.name || event.type);
     const brief = node('span', 'tool-brief', formatToolBrief(event));
     const statusText = event.type === 'tool-start' ? '执行中…' :
       event.type === 'tool-error' ? '失败' :
+      event.type === 'execution-stopped' ? '任务未完成' :
       event.type === 'tool-result' ? '已完成' :
       event.type === 'child-status' ? `子任务 ${labels[event.status] || event.status}` :
       event.type === 'retry' ? `重试 #${event.attempt}` :
@@ -610,7 +587,6 @@ async function refresh() {
       element('session-meta').textContent = `${workspaces.find(workspace => workspace.id === workspaceId)?.path || ''} · ${session.config?.values?.model?.name || 'Agent'}`;
       renderMessages(session);
       connectEvents(currentRun, session.events || []);
-      if (currentRun?.error) report(new Error(currentRun.error));
 
       const sessionModelName = session.config?.values?.model?.name;
       if (sessionModelName) {

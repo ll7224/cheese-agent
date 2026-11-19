@@ -1,0 +1,98 @@
+
+Running 12 tests using 1 worker
+
+[32m  ✓  [39m[90m[chrome] › dynamic-groups.test.ts:7:1 › initial search ranks groups by their best matching item[39m[2m (600ms)[22m
+[31m  ✘  [39m[31m[chrome] › dynamic-groups.test.ts:13:1 › removing an item before searching does not corrupt later group ranking[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › dynamic-groups.test.ts:21:1 › active search updates group order and selection when items are removed and restored[39m[2m (5s)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:8:3 › arrow keybinds › arrow up/down changes selected item[39m[2m (596ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:16:3 › arrow keybinds › meta arrow up/down goes to first and last item[39m[2m (484ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:24:3 › arrow keybinds › alt arrow up/down goes to next and prev item[39m[2m (453ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:42:3 › vim jk keybinds › ctrl j/k changes selected item[39m[2m (427ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:50:3 › vim jk keybinds › meta ctrl j/k goes to first and last item[39m[2m (430ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:58:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item[39m[2m (436ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:76:3 › vim np keybinds › ctrl n/p changes selected item[39m[2m (446ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:84:3 › vim np keybinds › meta ctrl n/p goes to first and last item[39m[2m (450ms)[22m
+[32m  ✓  [39m[90m[chrome] › keybind.test.ts:92:3 › vim np keybinds › alt ctrl n/p goes to next and prev item[39m[2m (429ms)[22m
+
+
+[31m  1) [chrome] › dynamic-groups.test.ts:13:1 › removing an item before searching does not corrupt later group ranking [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveText[2m([22m[32mexpected[39m[2m) // deep equality[22m
+
+    [32m- Expected  - 1[39m
+    [31m+ Received  + 1[39m
+
+    [2m  Array [[22m
+    [32m-   "Actions",[39m
+    [2m    "Projects",[22m
+    [31m+   "Actions",[39m
+    [2m  ][22m
+    Call log:
+      [2m- expect.toHaveText with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-group]:not([hidden]) [cmdk-group-heading]"[22m
+    [2m  -   selector resolved to 2 elements[22m
+
+
+      15 |   await expect(page.locator('[cmdk-item][data-value="temporary"]')).toHaveCount(0)
+      16 |   await page.locator('[cmdk-input]').fill('rank')
+    > 17 |   await expect(headings(page)).toHaveText(['Actions', 'Projects'])
+         |                                ^
+      18 |   await expect(page.locator('[cmdk-item]')).toHaveCount(2)
+      19 | })
+      20 |
+
+    [2m    at <reference-workspace>/test/dynamic-groups.test.ts:17:32[22m
+
+    Pending operations:
+      - expect.toHaveText at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/matchers/toEqual.js:41:62
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/reference/dynamic-groups-removing-an-item-before-searching-does-not-corrupt-later-group-ranking-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  2) [chrome] › dynamic-groups.test.ts:21:1 › active search updates group order and selection when items are removed and restored [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveText[2m([22m[32mexpected[39m[2m) // deep equality[22m
+
+    [32m- Expected  - 1[39m
+    [31m+ Received  + 1[39m
+
+    [2m  Array [[22m
+    [32m-   "Actions",[39m
+    [2m    "Projects",[22m
+    [31m+   "Actions",[39m
+    [2m  ][22m
+    Call log:
+      [2m- expect.toHaveText with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-group]:not([hidden]) [cmdk-group-heading]"[22m
+    [2m  -   selector resolved to 2 elements[22m
+
+
+      24 |   await page.locator('button', { hasText: 'Remove temporary item' }).click()
+      25 |   await expect(page.locator('[cmdk-item][data-value="temporary"]')).toHaveCount(0)
+    > 26 |   await expect(headings(page)).toHaveText(['Actions', 'Projects'])
+         |                                ^
+      27 |   await expect(page.locator('[cmdk-item][aria-selected="true"]')).toHaveAttribute('data-value', 'action')
+      28 |   await page.locator('button', { hasText: 'Add temporary item' }).click()
+      29 |   await expect(headings(page)).toHaveText(['Projects', 'Actions'])
+
+    [2m    at <reference-workspace>/test/dynamic-groups.test.ts:26:32[22m
+
+    Pending operations:
+      - expect.toHaveText at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/matchers/toEqual.js:41:62
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/reference/dynamic-groups-active-search-updates-group-order-and-selection-when-items-are-removed-and-restored-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+
+[31m  2 failed[39m
+[31m    [chrome] › dynamic-groups.test.ts:13:1 › removing an item before searching does not corrupt later group ranking [39m
+[31m    [chrome] › dynamic-groups.test.ts:21:1 › active search updates group order and selection when items are removed and restored [39m
+[32m  10 passed[39m[2m (19s)[22m

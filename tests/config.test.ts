@@ -4,6 +4,26 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureConfig, resolveConfig } from '../src/runtime/config.js';
+import { CheeseAgentConfigSchema } from '../src/config/schema.js';
+
+test('token budget has a compatible default, validates and freezes workspace overrides', () => {
+  const defaults = CheeseAgentConfigSchema.parse({});
+  assert.equal((defaults as any).execution?.tokenBudget, 500000);
+  for (const tokenBudget of [0, -1, 1.5]) {
+    assert.equal(CheeseAgentConfigSchema.safeParse({ execution: { tokenBudget } }).success, false);
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'cheese-budget-config-'));
+  try {
+    const workspace = join(dir, 'project'); mkdirSync(workspace);
+    writeFileSync(join(dir, 'cheese-agent.config.json'), JSON.stringify({ model: { provider: 'mock' }, execution: { tokenBudget: 1000000 } }));
+    const local = join(workspace, 'cheese-agent.config.json');
+    writeFileSync(local, JSON.stringify({ execution: { tokenBudget: 2000000 } }));
+    const snapshot = captureConfig(dir, workspace);
+    writeFileSync(local, JSON.stringify({ execution: { tokenBudget: 3000000 } }));
+    assert.equal((resolveConfig(snapshot) as any).execution.tokenBudget, 2000000);
+    assert.equal((captureConfig(dir, workspace).values as any).execution.tokenBudget, 3000000);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('Cron storage is workspace-local unless explicitly configured in that workspace', () => {
   const directory = mkdtempSync(join(tmpdir(), 'cheese-cron-config-'));

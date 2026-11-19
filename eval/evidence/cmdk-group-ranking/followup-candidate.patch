@@ -1,0 +1,125 @@
+--- a/cmdk/src/index.tsx
++++ b/cmdk/src/index.tsx
+@@ -75,7 +75,7 @@
+ type Context = {
+   value: (id: string, value: string) => void
+   item: (id: string, groupId: string) => () => void
+-  group: (id: string) => () => void
++  group: (id: string, element?: React.RefObject<HTMLDivElement>) => () => void
+   filter: () => boolean
+   label: string
+   // Ids
+@@ -132,6 +132,7 @@
+   }))
+   const allItems = useLazyRef<Set<string>>(() => new Set()) // [...itemIds]
+   const allGroups = useLazyRef<Map<string, Set<string>>>(() => new Map()) // groupId → [...itemIds]
++  const groupElements = useLazyRef<Map<string, React.RefObject<HTMLDivElement>>>(() => new Map())
+   const ids = useLazyRef<Map<string, string>>(() => new Map()) // id → value
+   const listeners = useLazyRef<Set<() => void>>(() => new Set()) // [...rerenders]
+   const propsRef = useAsRef(props)
+@@ -240,10 +241,14 @@
+           ids.current.delete(id)
+           allItems.current.delete(id)
+           state.current.filtered.items.delete(id)
++          if (groupId) {
++            allGroups.current.get(groupId)?.delete(id)
++          }
+ 
+           // Batch this, multiple items could be removed in one pass
+           schedule(4, () => {
+             filterItems()
++            sort()
+ 
+             // The item removed could have been the selected one,
+             // so selection should be moved to the first
+@@ -254,14 +259,18 @@
+         }
+       },
+       // Track group lifecycle (mount, unmount)
+-      group: (id) => {
++      group: (id, element) => {
+         if (!allGroups.current.has(id)) {
+           allGroups.current.set(id, new Set())
++        }
++        if (element) {
++          groupElements.current.set(id, element)
+         }
+ 
+         return () => {
+           ids.current.delete(id)
+           allGroups.current.delete(id)
++          groupElements.current.delete(id)
+         }
+       },
+       filter: () => {
+@@ -295,17 +304,17 @@
+ 
+     // Sort the groups
+     const groups: [string, number][] = []
+-    state.current.filtered.groups.forEach((value) => {
+-      const items = allGroups.current.get(value)
++    state.current.filtered.groups.forEach((groupId) => {
++      const items = allGroups.current.get(groupId)
+ 
+       // Get the maximum score of the group's items
+       let max = 0
+-      items.forEach((item) => {
+-        const score = scores.get(item)
+-        max = Math.max(score, max)
++      items?.forEach((item) => {
++        const itemScore = scores.get(item) ?? 0
++        max = Math.max(itemScore, max)
+       })
+ 
+-      groups.push([value, max])
++      groups.push([groupId, max])
+     })
+ 
+     // Sort items within groups to bottom
+@@ -318,7 +327,7 @@
+       .sort((a, b) => {
+         const valueA = a.getAttribute(VALUE_ATTR)
+         const valueB = b.getAttribute(VALUE_ATTR)
+-        return (scores.get(valueB) ?? 0) - (scores.get(valueA) ?? 0)
++        return (score(valueB) ?? 0) - (score(valueA) ?? 0)
+       })
+       .forEach((item) => {
+         const group = item.closest(GROUP_ITEMS_SELECTOR)
+@@ -333,8 +342,15 @@
+     groups
+       .sort((a, b) => b[1] - a[1])
+       .forEach((group) => {
+-        const element = ref.current.querySelector(`${GROUP_SELECTOR}[${VALUE_ATTR}="${group[0]}"]`)
+-        element?.parentElement.appendChild(element)
++        const element = groupElements.current.get(group[0])?.current
++        if (element) {
++          element.parentElement?.appendChild(element)
++        } else {
++          const value = ids.current.get(group[0])
++          if (!value) return
++          const el = ref.current.querySelector(`${GROUP_SELECTOR}[${VALUE_ATTR}="${escapeSelector(value)}"]`)
++          el?.parentElement?.appendChild(el)
++        }
+       })
+   }
+ 
+@@ -622,7 +638,7 @@
+   )
+ 
+   useLayoutEffect(() => {
+-    return context.group(id)
++    return context.group(id, ref)
+   }, [])
+ 
+   useValue(id, ref, [props.value, props.heading, headingRef])
+@@ -821,6 +837,10 @@
+  *
+  */
+ 
++function escapeSelector(val: string) {
++  return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(val) : val.replace(/["\\]/g, (m) => '\\' + m)
++}
++
+ function findNextSibling(el: Element, selector: string) {
+   let sibling = el.nextElementSibling
+ 

@@ -1,0 +1,74 @@
+--- a/cmdk/src/index.tsx
++++ b/cmdk/src/index.tsx
+@@ -240,10 +240,14 @@
+           ids.current.delete(id)
+           allItems.current.delete(id)
+           state.current.filtered.items.delete(id)
++          if (groupId) {
++            allGroups.current.get(groupId)?.delete(id)
++          }
+ 
+           // Batch this, multiple items could be removed in one pass
+           schedule(4, () => {
+             filterItems()
++            sort()
+ 
+             // The item removed could have been the selected one,
+             // so selection should be moved to the first
+@@ -295,17 +299,17 @@
+ 
+     // Sort the groups
+     const groups: [string, number][] = []
+-    state.current.filtered.groups.forEach((value) => {
+-      const items = allGroups.current.get(value)
++    state.current.filtered.groups.forEach((groupId) => {
++      const items = allGroups.current.get(groupId)
+ 
+       // Get the maximum score of the group's items
+       let max = 0
+-      items.forEach((item) => {
+-        const score = scores.get(item)
+-        max = Math.max(score, max)
++      items?.forEach((item) => {
++        const itemScore = scores.get(item) ?? 0
++        max = Math.max(itemScore, max)
+       })
+ 
+-      groups.push([value, max])
++      groups.push([groupId, max])
+     })
+ 
+     // Sort items within groups to bottom
+@@ -318,7 +322,7 @@
+       .sort((a, b) => {
+         const valueA = a.getAttribute(VALUE_ATTR)
+         const valueB = b.getAttribute(VALUE_ATTR)
+-        return (scores.get(valueB) ?? 0) - (scores.get(valueA) ?? 0)
++        return (score(valueB) ?? 0) - (score(valueA) ?? 0)
+       })
+       .forEach((item) => {
+         const group = item.closest(GROUP_ITEMS_SELECTOR)
+@@ -333,8 +337,10 @@
+     groups
+       .sort((a, b) => b[1] - a[1])
+       .forEach((group) => {
+-        const element = ref.current.querySelector(`${GROUP_SELECTOR}[${VALUE_ATTR}="${group[0]}"]`)
+-        element?.parentElement.appendChild(element)
++        const value = ids.current.get(group[0])
++        if (!value) return
++        const element = ref.current.querySelector(`${GROUP_SELECTOR}[${VALUE_ATTR}="${escapeSelector(value)}"]`)
++        element?.parentElement?.appendChild(element)
+       })
+   }
+ 
+@@ -821,6 +827,10 @@
+  *
+  */
+ 
++function escapeSelector(val: string) {
++  return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(val) : val.replace(/["\\]/g, (m) => '\\' + m)
++}
++
+ function findNextSibling(el: Element, selector: string) {
+   let sibling = el.nextElementSibling
+ 

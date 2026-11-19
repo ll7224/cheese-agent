@@ -1,0 +1,53 @@
+
+Running 1 test using 1 worker
+
+[31m  ✘  [39m[31m[chrome] › duplicate-groups.test.js:3:1 › groups with identical headings keep independent identity when sorting[39m[2m (5s)[22m
+
+
+[31m  1) [chrome] › duplicate-groups.test.js:3:1 › groups with identical headings keep independent identity when sorting [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected string: [32m"[7mhigh[27m-score-group"[39m
+    Received string: [31m"[7mlow[27m-score-group"[39m
+    Call log:
+      [2m- expect.toHaveAttribute with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-group] >> nth=0"[22m
+    [2m  -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>[22m
+    [2m  -   unexpected value "low-score-group"[22m
+    [2m  -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>[22m
+    [2m  -   unexpected value "low-score-group"[22m
+    [2m  -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>[22m
+    [2m  -   unexpected value "low-score-group"[22m
+    [2m  -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>[22m
+    [2m  -   unexpected value "low-score-group"[22m
+    [2m  -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>[22m
+    [2m  -   unexpected value "low-score-group"[22m
+    [2m  -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>[22m
+    [2m  -   unexpected value "low-score-group"[22m
+    [2m  -   selector resolved to <div cmdk-group="" role="presentation" data-value="re…>…</div>[22m
+    [2m  -   unexpected value "low-score-group"[22m
+
+
+      4 |   await page.goto('/duplicate-groups');
+      5 |   await page.locator('[cmdk-input]').fill('rank');
+    > 6 |   await expect(page.locator('[cmdk-group]').first()).toHaveAttribute('data-testid', 'high-score-group');
+        |                                                      ^
+      7 | });
+      8 |
+
+    [2m    at <cheese-repo>/eval/probes/cmdk-group-ranking/duplicate-groups.test.js:6:54[22m
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/duplicate-groups/duplicate-groups-groups-with-identical-headings-keep-independent-identity-when-sorting-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+
+[31m  1 failed[39m
+[31m    [chrome] › duplicate-groups.test.js:3:1 › groups with identical headings keep independent identity when sorting [39m

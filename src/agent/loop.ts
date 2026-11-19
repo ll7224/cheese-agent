@@ -4,17 +4,19 @@ import { detect, recordCall, recordResult, resetHistory } from './loop-detection
 import { isRetryable, calculateDelay } from './retry.js';
 import { type UsageTracker, normalizeUsage } from '../usage/tracker.js';
 import type { ExecutionOptions } from '../runtime/events.js';
+import { stopExecution } from './termination.js';
+import { DEFAULT_TOKEN_BUDGET } from './limits.js';
+import { InvestigationProgress } from './investigation-progress.js';
 
 /**
  * Agent 核心运行循环配置常量
  *
  * MAX_STEPS: 单次交互允许的最大推理步数（防止多轮工具调用无限发散）
  * MAX_RETRIES: 单步调用 LLM 发生网络/临时错误时的最大重试次数
- * TOKEN_BUDGET: 单次交互的最大 Token 消耗上限预算（防止成本失控）
+ * Token 预算通过 ExecutionOptions 配置，默认值见 limits.ts。
  */
 const MAX_STEPS = 15;
 const MAX_RETRIES = 5;
-const TOKEN_BUDGET = 500000;
 
 /**
  * Agent 核心执行循环（ReAct / Tool-Use 驱动引擎）。
@@ -35,7 +37,7 @@ const TOKEN_BUDGET = 500000;
  *    - 满足以下任一条件时自动跳出循环：
  *      a) 步内无任何工具调用（LLM 给出最终自然语言回答）。
  *      b) 循环检测器判定死循环并触发熔断。
- *      c) 消耗 Token 超过全局预设上限（TOKEN_BUDGET）。
+ *      c) 累计输入与输出 Token 达到该次循环的预算。
  *      d) 达到最大允许步数（MAX_STEPS）。
  *
  * @param model - AI SDK 兼容的模型实例
@@ -120,8 +122,11 @@ export async function agentLoop(
   let step = 0;
   let totalTokens = 0;
   const maxSteps = options.maxSteps || MAX_STEPS;
+  const tokenBudget = options.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
+  if (!Number.isSafeInteger(tokenBudget) || tokenBudget <= 0) throw new Error('tokenBudget 必须为正整数');
   // 每次进入 Agent 任务前重置死循环检测的历史记录
   resetHistory();
+  const investigation = new InvestigationProgress();
 
   while (step < maxSteps) {
     options.signal?.throwIfAborted();
@@ -131,10 +136,15 @@ export async function agentLoop(
     let hasToolCall = false;
     let fullText = '';
     let shouldBreak = false;
+    let loopStopMessage = '';
     let lastToolCall: { name: string; input: unknown } | null = null;
     let stepResponse: any;
     let stepUsage: any;
+    let finishReason: string | undefined;
     const calls = new Map<string, { name: string; input: unknown }>();
+    const reminders: Array<{ reason: string; message: string }> = [];
+    const toolResults: Array<{ name: string; output: unknown }> = [];
+    let toolFailed = false;
 
     // ── 单步执行与重试循环 ──────────────────────────
     for (let attempt = 1; ; attempt++) {
@@ -158,7 +168,7 @@ export async function agentLoop(
         const thinkingFilter = createThinkingFilter(
           (text) => {
             options.emit?.({ type: 'text', text, step, attempt });
-            process.stdout.write(text);
+            if (!options.emit) process.stdout.write(text);
             fullText += text;
           },
           (reasoningText) => {
@@ -206,11 +216,12 @@ export async function agentLoop(
                 console.log(`  ${detection.message}`);
                 if (detection.level === 'critical') {
                   shouldBreak = true; // 严重重复，直接熔断跳出
+                  loopStopMessage = detection.message;
                 } else {
-                  // 轻度循环，注入系统反馈提醒模型换思路
-                  messages.push({
-                    role: 'user' as const,
-                    content: `[系统提醒] ${detection.message}。请换一个思路解决问题，不要重复同样的操作。`,
+                  // Append feedback after the complete assistant/tool exchange.
+                  reminders.push({
+                    reason: 'repeated-call',
+                    message: `${detection.message}。请换一个思路解决问题，不要重复同样的操作。`,
                   });
                 }
               }
@@ -229,6 +240,7 @@ export async function agentLoop(
               if (matchingCall) {
                 // 登记结果指纹，用于识别结果恒定不变的无进展重复
                 recordResult(matchingCall.name, matchingCall.input, part.output);
+                toolResults.push({ name: matchingCall.name, output: part.output });
               }
               break;
             }
@@ -238,6 +250,7 @@ export async function agentLoop(
               throw part.error;
             }
             case 'tool-error':
+              toolFailed = true;
               options.emit?.({ type: 'tool-error', toolCallId: part.toolCallId, name: part.toolName, error: String(part.error), step, attempt });
               break;
           }
@@ -248,6 +261,7 @@ export async function agentLoop(
         // 等待当前步完整响应元数据
         stepResponse = await result.response;
         stepUsage = await result.usage;
+        finishReason = await result.finishReason;
 
         // 若 assistant message 中包含 <think> 标签，提纯内容并挂载 reasoning
         if (stepResponse?.messages) {
@@ -303,14 +317,13 @@ export async function agentLoop(
         hasToolCall = false;
         fullText = '';
         shouldBreak = false;
+        loopStopMessage = '';
         lastToolCall = null;
+        calls.clear();
+        reminders.length = 0;
+        toolResults.length = 0;
+        toolFailed = false;
       }
-    }
-
-    // 若触发关键熔断，立即终止 Agent Loop
-    if (shouldBreak) {
-      console.log('\n[循环检测触发，Agent 已停止]');
-      break;
     }
 
     // 将本轮 Assistant 生成的内容及 Tool 执行消息推入上下文
@@ -319,7 +332,23 @@ export async function agentLoop(
     // ── Token 计量与 Cache Hit 状态展示 ───────────
     const norm = normalizeUsage(stepUsage);
     const stepRecord = tracker?.record(model?.modelId || 'mock-model', norm);
-    totalTokens += norm.inputTokens + norm.outputTokens + norm.cacheReadTokens + norm.cacheWriteTokens;
+    // SDK totals already include cached input; do not count cache reads twice.
+    totalTokens += stepUsage?.totalTokens ?? ((stepUsage?.inputTokens ?? 0) + (stepUsage?.outputTokens ?? 0));
+    options.emit?.({ type: 'step-finish', step, finishReason, usage: {
+      input: stepUsage?.inputTokens ?? null, output: stepUsage?.outputTokens ?? null,
+      total: stepUsage?.totalTokens ?? null,
+    } });
+
+    if (shouldBreak) {
+      stopExecution(options, 'loop-detected', `${loopStopMessage}。本次任务未完成，请查看最后的工具结果后调整指令。`, step);
+    }
+    if (finishReason === 'length') {
+      stopExecution(options, 'model-length', '模型回复达到输出长度限制，任务未完成；已有输出和执行记录已保留。', step);
+    }
+    if (finishReason === 'content-filter' || finishReason === 'error') {
+      stopExecution(options, finishReason === 'error' ? 'model-error' : 'content-filter',
+        finishReason === 'error' ? '模型以错误状态结束，未完成本次任务。' : '模型因内容过滤停止，未完成本次任务。', step);
+    }
 
     // 当有 Prompt Cache 命中或写入时，输出高亮提示
     if (stepRecord && (norm.cacheReadTokens > 0 || norm.cacheWriteTokens > 0)) {
@@ -328,25 +357,48 @@ export async function agentLoop(
       console.log(`  [${tag}] ${detail} tokens · 本步 $${stepRecord.cost.toFixed(5)}`);
     }
 
-    // 预算监控与预警
-    if (totalTokens > TOKEN_BUDGET * 0.9) {
-      console.log(`  [Token] ${totalTokens}/${TOKEN_BUDGET} (${Math.round(totalTokens / TOKEN_BUDGET * 100)}%)`);
-    }
-    if (totalTokens > TOKEN_BUDGET) {
-      console.log('\n[Token 预算耗尽]');
-      break;
+    // A normal final answer needs no further step, even when its usage crosses the budget.
+    if (!hasToolCall) {
+      if (!fullText.trim()) {
+        stopExecution(options, 'empty-response', '模型结束了本轮响应，但没有返回最终答复。请查看执行日志中的最后一步后决定是否继续。', step, { finishReason });
+      }
+      console.log();
+      return;
     }
 
-    // 若模型未发起任何 Tool Call，说明已得出最终回答，终止多步循环
-    if (!hasToolCall) {
-      if (fullText) console.log();
-      break;
+    // 预算监控与预警
+    if (totalTokens > tokenBudget * 0.9) {
+      console.log(`  [Token] ${totalTokens}/${tokenBudget} (${Math.round(totalTokens / tokenBudget * 100)}%)`);
+    }
+    if (totalTokens >= tokenBudget) {
+      stopExecution(options, 'token-budget', `本次运行已达到 Token 预算上限（${tokenBudget.toLocaleString('en-US')}），累计已用 ${totalTokens.toLocaleString('en-US')}。任务已停止，未确认完成。请查看执行日志，检查最后一步后再决定继续或调整预算。`, step, { used: totalTokens, budget: tokenBudget });
+    }
+
+    if (step < maxSteps) {
+      // A modifying/unknown tool may change the evidence, even when it shares a
+      // step with reads. Only completed, wholly read-only steps feed the tracker.
+      if (toolFailed || [...calls.values()].some(call => registry.get(call.name)?.isReadOnly !== true)) {
+        investigation.observe(undefined, undefined);
+      } else {
+        for (const result of toolResults) {
+          if (investigation.observe(registry.get(result.name), result.output)) {
+            reminders.push({
+              reason: 'repeated-evidence',
+              message: '近期多次只读调用返回了已见结果，可能正在重复取证。请先整理已知证据、当前假设和仍缺少的信息；接下来的检查应能区分原因。证据足够时按任务授权修复并验证；无法继续时说明具体阻塞并交付已有发现，不要只更换关键词重复搜索，也不要为结束调查而盲目修改。',
+            });
+          }
+        }
+      }
+      for (const reminder of reminders) {
+        messages.push({ role: 'user', content: `[系统提醒] ${reminder.message}` });
+        options.emit?.({ type: 'execution-warning', ...reminder, step });
+      }
     }
 
     console.log('  → 继续下一步...');
   }
 
   if (step >= maxSteps) {
-    console.log('\n[达到最大步数]');
+    stopExecution(options, 'step-limit', `已达到本次运行的 ${maxSteps} 步上限，任务已停止，尚未生成最终答复。已有执行记录已保留，请检查后再决定是否继续。`, step, { maxSteps });
   }
 }

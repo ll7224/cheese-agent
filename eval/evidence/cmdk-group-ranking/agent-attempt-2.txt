@@ -1,0 +1,102 @@
+
+> cmdk-root@ build <candidate-workspace>
+> pnpm -F cmdk build
+
+
+> cmdk@0.1.19 build <candidate-workspace>/cmdk
+> tsup src
+
+CLI Building entry: src/index.tsx
+CLI Using tsconfig: ../tsconfig.json
+CLI tsup v6.2.1
+CLI Using tsup config: <candidate-workspace>/cmdk/tsup.config.ts
+CLI Target: node14
+ESM Build start
+CJS Build start
+DTS Build start
+undefined
+<candidate-workspace>/cmdk:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  cmdk@0.1.19 build: `tsup src`
+Exit status 1
+ ELIFECYCLE  Command failed with exit code 1.
+
+✘ [ERROR] Unterminated string literal
+
+    src/index.tsx:831:98:
+      831 │ ...' && CSS.escape ? CSS.escape(val) : val.replace(/["\\]/g, '\\/**
+          ╵                                                                    ^
+
+✘ [ERROR] Unterminated string literal
+
+    src/index.tsx:831:98:
+      831 │ ...' && CSS.escape ? CSS.escape(val) : val.replace(/["\\]/g, '\\/**
+          ╵                                                                    ^
+
+ESM Build failed
+Error: Build failed with 1 error:
+src/index.tsx:831:98: ERROR: Unterminated string literal
+    at failureErrorWithLog (<candidate-workspace>/node_modules/.pnpm/esbuild@0.14.54/node_modules/esbuild/lib/main.js:1624:15)
+    at <candidate-workspace>/node_modules/.pnpm/esbuild@0.14.54/node_modules/esbuild/lib/main.js:1266:28
+    at runOnEndCallbacks (<candidate-workspace>/node_modules/.pnpm/esbuild@0.14.54/node_modules/esbuild/lib/main.js:1046:63)
+    at buildResponseToResult (<candidate-workspace>/node_modules/.pnpm/esbuild@0.14.54/node_modules/esbuild/lib/main.js:1264:7)
+    at <candidate-workspace>/node_modules/.pnpm/esbuild@0.14.54/node_modules/esbuild/lib/main.js:1377:14
+    at <candidate-workspace>/node_modules/.pnpm/esbuild@0.14.54/node_modules/esbuild/lib/main.js:678:9
+    at handleIncomingPacket (<candidate-workspace>/node_modules/.pnpm/esbuild@0.14.54/node_modules/esbuild/lib/main.js:775:9)
+    at Socket.readFromStdout (<candidate-workspace>/node_modules/.pnpm/esbuild@0.14.54/node_modules/esbuild/lib/main.js:644:7)
+    at Socket.emit (node:events:513:28)
+    at addChunk (node:internal/streams/readable:315:12)
+CJS Build failed
+src/index.tsx(831,99): error TS1002: Unterminated string literal.
+src/index.tsx(833,2): error TS1109: Expression expected.
+src/index.tsx(834,2): error TS1109: Expression expected.
+src/index.tsx(836,2): error TS1109: Expression expected.
+src/index.tsx(837,2): error TS1109: Expression expected.
+src/index.tsx(837,4): error TS1161: Unterminated regular expression literal.
+src/index.tsx(839,1): error TS1005: ',' expected.
+src/index.tsx(839,60): error TS1002: Unterminated string literal.
+src/index.tsx(842,1): error TS1005: ',' expected.
+src/index.tsx(851,1): error TS1005: ',' expected.
+src/index.tsx(860,1): error TS1005: ',' expected.
+src/index.tsx(870,1): error TS1005: ',' expected.
+src/index.tsx(960,1): error TS1005: '}' expected.
+src/index.tsx(119,17): error TS2304: Cannot find name 'useLazyRef'.
+src/index.tsx(133,20): error TS2304: Cannot find name 'useLazyRef'.
+src/index.tsx(134,21): error TS2304: Cannot find name 'useLazyRef'.
+src/index.tsx(135,15): error TS2304: Cannot find name 'useLazyRef'.
+src/index.tsx(136,21): error TS2304: Cannot find name 'useLazyRef'.
+src/index.tsx(137,20): error TS2304: Cannot find name 'useAsRef'.
+src/index.tsx(144,20): error TS2304: Cannot find name 'useScheduleLayoutEffect'.
+src/index.tsx(147,3): error TS2304: Cannot find name 'useLayoutEffect'.
+src/index.tsx(438,28): error TS2304: Cannot find name 'findNextSibling'.
+src/index.tsx(438,69): error TS2304: Cannot find name 'findPreviousSibling'.
+src/index.tsx(483,12): error TS2304: Cannot find name 'mergeRefs'.
+src/index.tsx(545,16): error TS2304: Cannot find name 'srOnlyStyles'.
+src/index.tsx(566,20): error TS2304: Cannot find name 'useAsRef'.
+src/index.tsx(568,3): error TS2304: Cannot find name 'useLayoutEffect'.
+src/index.tsx(572,17): error TS2304: Cannot find name 'useValue'.
+src/index.tsx(575,20): error TS2304: Cannot find name 'useCmdk'.
+src/index.tsx(576,18): error TS2304: Cannot find name 'useCmdk'.
+src/index.tsx(601,12): error TS2304: Cannot find name 'mergeRefs'.
+src/index.tsx(626,18): error TS2304: Cannot find name 'useCmdk'.
+src/index.tsx(630,3): error TS2304: Cannot find name 'useLayoutEffect'.
+src/index.tsx(634,3): error TS2304: Cannot find name 'useValue'.
+src/index.tsx(640,12): error TS2304: Cannot find name 'mergeRefs'.
+src/index.tsx(665,18): error TS2304: Cannot find name 'useCmdk'.
+src/index.tsx(668,20): error TS2304: Cannot find name 'mergeRefs'.
+src/index.tsx(679,18): error TS2304: Cannot find name 'useCmdk'.
+src/index.tsx(740,12): error TS2304: Cannot find name 'mergeRefs'.
+src/index.tsx(777,18): error TS2304: Cannot find name 'useCmdk'.
+src/index.tsx(819,10): error TS2304: Cannot find name 'useCmdk'.
+src/index.tsx(831,93): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+src/index.tsx(834,4): error TS2304: Cannot find name 'Helpers'.
+src/index.tsx(837,3): error TS2363: The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+src/index.tsx(839,1): error TS2554: Expected 2 arguments, but got 6.
+
+Error: Failed to compile. Check the logs above.
+    at error (<candidate-workspace>/node_modules/.pnpm/rollup@2.77.2/node_modules/rollup/dist/shared/rollup.js:198:30)
+    at throwPluginError (<candidate-workspace>/node_modules/.pnpm/rollup@2.77.2/node_modules/rollup/dist/shared/rollup.js:21895:12)
+    at Object.error (<candidate-workspace>/node_modules/.pnpm/rollup@2.77.2/node_modules/rollup/dist/shared/rollup.js:22617:20)
+    at Object.error (<candidate-workspace>/node_modules/.pnpm/rollup@2.77.2/node_modules/rollup/dist/shared/rollup.js:22072:42)
+    at Object.transform (<candidate-workspace>/node_modules/.pnpm/tsup@6.2.1_typescript@4.6.4/node_modules/tsup/dist/rollup.js:8358:20)
+    at <candidate-workspace>/node_modules/.pnpm/rollup@2.77.2/node_modules/rollup/dist/shared/rollup.js:22826:37
+DTS Build error

@@ -1,0 +1,418 @@
+
+Running 12 tests using 1 worker
+
+[31m  ✘  [39m[31m[chrome] › dynamic-groups.test.ts:7:1 › initial search ranks groups by their best matching item[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › dynamic-groups.test.ts:13:1 › removing an item before searching does not corrupt later group ranking[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › dynamic-groups.test.ts:21:1 › active search updates group order and selection when items are removed and restored[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › keybind.test.ts:8:3 › arrow keybinds › arrow up/down changes selected item[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › keybind.test.ts:16:3 › arrow keybinds › meta arrow up/down goes to first and last item[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › keybind.test.ts:24:3 › arrow keybinds › alt arrow up/down goes to next and prev item[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › keybind.test.ts:42:3 › vim jk keybinds › ctrl j/k changes selected item[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › keybind.test.ts:50:3 › vim jk keybinds › meta ctrl j/k goes to first and last item[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › keybind.test.ts:58:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › keybind.test.ts:76:3 › vim np keybinds › ctrl n/p changes selected item[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › keybind.test.ts:84:3 › vim np keybinds › meta ctrl n/p goes to first and last item[39m[2m (5s)[22m
+[31m  ✘  [39m[31m[chrome] › keybind.test.ts:92:3 › vim np keybinds › alt ctrl n/p goes to next and prev item[39m[2m (5s)[22m
+
+
+[31m  1) [chrome] › dynamic-groups.test.ts:7:1 › initial search ranks groups by their best matching item [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    locator.fill: Target closed
+    =========================== logs ===========================
+    waiting for selector "[cmdk-input]"
+    ============================================================
+
+       6 |
+       7 | test('initial search ranks groups by their best matching item', async ({ page }) => {
+    >  8 |   await page.locator('[cmdk-input]').fill('rank')
+         |                                      ^
+       9 |   await expect(headings(page)).toHaveText(['Projects', 'Actions'])
+      10 |   await expect(page.locator('[cmdk-item]')).toHaveCount(3)
+      11 | })
+
+    [2m    at <candidate-workspace>/test/dynamic-groups.test.ts:8:38[22m
+    [2m    at <candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:397:15[22m
+    [2m    at TestInfoImpl._runFn (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/testInfo.js:170:7)[22m
+    [2m    at <candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:348:26[22m
+    [2m    at TimeoutManager.runWithTimeout (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/timeoutManager.js:73:7)[22m
+    [2m    at TestInfoImpl._runWithTimeout (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/testInfo.js:158:26)[22m
+    [2m    at WorkerRunner._runTest (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:328:5)[22m
+    [2m    at WorkerRunner.runTestGroup (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:195:11)[22m
+    [2m    at process.<anonymous> (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/worker.js:88:5)[22m
+
+    Pending operations:
+      - locator.fill at test/dynamic-groups.test.ts:8:38
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/dynamic-groups-initial-search-ranks-groups-by-their-best-matching-item-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  2) [chrome] › dynamic-groups.test.ts:13:1 › removing an item before searching does not corrupt later group ranking [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    locator.click: Target closed
+    =========================== logs ===========================
+    waiting for selector "button >> :scope:has-text("Remove temporary item")"
+    ============================================================
+
+      12 |
+      13 | test('removing an item before searching does not corrupt later group ranking', async ({ page }) => {
+    > 14 |   await page.locator('button', { hasText: 'Remove temporary item' }).click()
+         |                                                                      ^
+      15 |   await expect(page.locator('[cmdk-item][data-value="temporary"]')).toHaveCount(0)
+      16 |   await page.locator('[cmdk-input]').fill('rank')
+      17 |   await expect(headings(page)).toHaveText(['Actions', 'Projects'])
+
+    [2m    at <candidate-workspace>/test/dynamic-groups.test.ts:14:70[22m
+    [2m    at <candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:397:15[22m
+    [2m    at TestInfoImpl._runFn (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/testInfo.js:170:7)[22m
+    [2m    at <candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:348:26[22m
+    [2m    at TimeoutManager.runWithTimeout (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/timeoutManager.js:73:7)[22m
+    [2m    at TestInfoImpl._runWithTimeout (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/testInfo.js:158:26)[22m
+    [2m    at WorkerRunner._runTest (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:328:5)[22m
+    [2m    at WorkerRunner.runTestGroup (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:195:11)[22m
+    [2m    at process.<anonymous> (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/worker.js:88:5)[22m
+
+    Pending operations:
+      - locator.click at test/dynamic-groups.test.ts:14:70
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/dynamic-groups-removing-an-item-before-searching-does-not-corrupt-later-group-ranking-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  3) [chrome] › dynamic-groups.test.ts:21:1 › active search updates group order and selection when items are removed and restored [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    locator.fill: Target closed
+    =========================== logs ===========================
+    waiting for selector "[cmdk-input]"
+    ============================================================
+
+      20 |
+      21 | test('active search updates group order and selection when items are removed and restored', async ({ page }) => {
+    > 22 |   await page.locator('[cmdk-input]').fill('rank')
+         |                                      ^
+      23 |   await expect(headings(page)).toHaveText(['Projects', 'Actions'])
+      24 |   await page.locator('button', { hasText: 'Remove temporary item' }).click()
+      25 |   await expect(page.locator('[cmdk-item][data-value="temporary"]')).toHaveCount(0)
+
+    [2m    at <candidate-workspace>/test/dynamic-groups.test.ts:22:38[22m
+    [2m    at <candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:397:15[22m
+    [2m    at TestInfoImpl._runFn (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/testInfo.js:170:7)[22m
+    [2m    at <candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:348:26[22m
+    [2m    at TimeoutManager.runWithTimeout (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/timeoutManager.js:73:7)[22m
+    [2m    at TestInfoImpl._runWithTimeout (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/testInfo.js:158:26)[22m
+    [2m    at WorkerRunner._runTest (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:328:5)[22m
+    [2m    at WorkerRunner.runTestGroup (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/workerRunner.js:195:11)[22m
+    [2m    at process.<anonymous> (<candidate-workspace>/node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/worker.js:88:5)[22m
+
+    Pending operations:
+      - locator.fill at test/dynamic-groups.test.ts:22:38
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/dynamic-groups-active-search-updates-group-order-and-selection-when-items-are-removed-and-restored-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  4) [chrome] › keybind.test.ts:8:3 › arrow keybinds › arrow up/down changes selected item [90m=========[31m[39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected string: [32m"first"[39m
+    Received string: [31m""[39m
+    Call log:
+      [2m- expect.toHaveAttribute with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-item][aria-selected="true"]"[22m
+
+
+       7 |
+       8 |   test('arrow up/down changes selected item', async ({ page }) => {
+    >  9 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+         |                                                                     ^
+      10 |     await page.locator(`[cmdk-input]`).press('ArrowDown')
+      11 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'a')
+      12 |     await page.locator(`[cmdk-input]`).press('ArrowUp')
+
+    [2m    at <candidate-workspace>/test/keybind.test.ts:9:69[22m
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/keybind-arrow-keybinds-arrow-up-down-changes-selected-item-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  5) [chrome] › keybind.test.ts:16:3 › arrow keybinds › meta arrow up/down goes to first and last item [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected string: [32m"first"[39m
+    Received string: [31m""[39m
+    Call log:
+      [2m- expect.toHaveAttribute with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-item][aria-selected="true"]"[22m
+
+
+      15 |
+      16 |   test('meta arrow up/down goes to first and last item', async ({ page }) => {
+    > 17 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+         |                                                                     ^
+      18 |     await page.locator(`[cmdk-input]`).press('Meta+ArrowDown')
+      19 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'last')
+      20 |     await page.locator(`[cmdk-input]`).press('Meta+ArrowUp')
+
+    [2m    at <candidate-workspace>/test/keybind.test.ts:17:69[22m
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/keybind-arrow-keybinds-meta-arrow-up-down-goes-to-first-and-last-item-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  6) [chrome] › keybind.test.ts:24:3 › arrow keybinds › alt arrow up/down goes to next and prev item [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected string: [32m"first"[39m
+    Received string: [31m""[39m
+    Call log:
+      [2m- expect.toHaveAttribute with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-item][aria-selected="true"]"[22m
+
+
+      23 |
+      24 |   test('alt arrow up/down goes to next and prev item', async ({ page }) => {
+    > 25 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+         |                                                                     ^
+      26 |     await page.locator(`[cmdk-input]`).press('Alt+ArrowDown')
+      27 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'a')
+      28 |     await page.locator(`[cmdk-input]`).press('Alt+ArrowDown')
+
+    [2m    at <candidate-workspace>/test/keybind.test.ts:25:69[22m
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/keybind-arrow-keybinds-alt-arrow-up-down-goes-to-next-and-prev-item-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  7) [chrome] › keybind.test.ts:42:3 › vim jk keybinds › ctrl j/k changes selected item [90m============[31m[39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected string: [32m"first"[39m
+    Received string: [31m""[39m
+    Call log:
+      [2m- expect.toHaveAttribute with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-item][aria-selected="true"]"[22m
+
+
+      41 |
+      42 |   test('ctrl j/k changes selected item', async ({ page }) => {
+    > 43 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+         |                                                                     ^
+      44 |     await page.locator(`[cmdk-input]`).press('Control+j')
+      45 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'a')
+      46 |     await page.locator(`[cmdk-input]`).press('Control+k')
+
+    [2m    at <candidate-workspace>/test/keybind.test.ts:43:69[22m
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/keybind-vim-jk-keybinds-ctrl-j-k-changes-selected-item-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  8) [chrome] › keybind.test.ts:50:3 › vim jk keybinds › meta ctrl j/k goes to first and last item [90m=[31m[39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected string: [32m"first"[39m
+    Received string: [31m""[39m
+    Call log:
+      [2m- expect.toHaveAttribute with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-item][aria-selected="true"]"[22m
+
+
+      49 |
+      50 |   test('meta ctrl j/k goes to first and last item', async ({ page }) => {
+    > 51 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+         |                                                                     ^
+      52 |     await page.locator(`[cmdk-input]`).press('Meta+Control+j')
+      53 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'last')
+      54 |     await page.locator(`[cmdk-input]`).press('Meta+Control+k')
+
+    [2m    at <candidate-workspace>/test/keybind.test.ts:51:69[22m
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/keybind-vim-jk-keybinds-meta-ctrl-j-k-goes-to-first-and-last-item-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  9) [chrome] › keybind.test.ts:58:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item [90m===[31m[39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected string: [32m"first"[39m
+    Received string: [31m""[39m
+    Call log:
+      [2m- expect.toHaveAttribute with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-item][aria-selected="true"]"[22m
+
+
+      57 |
+      58 |   test('alt ctrl j/k goes to next and prev item', async ({ page }) => {
+    > 59 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+         |                                                                     ^
+      60 |     await page.locator(`[cmdk-input]`).press('Alt+Control+j')
+      61 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'a')
+      62 |     await page.locator(`[cmdk-input]`).press('Alt+Control+j')
+
+    [2m    at <candidate-workspace>/test/keybind.test.ts:59:69[22m
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/keybind-vim-jk-keybinds-alt-ctrl-j-k-goes-to-next-and-prev-item-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  10) [chrome] › keybind.test.ts:76:3 › vim np keybinds › ctrl n/p changes selected item [90m===========[31m[39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected string: [32m"first"[39m
+    Received string: [31m""[39m
+    Call log:
+      [2m- expect.toHaveAttribute with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-item][aria-selected="true"]"[22m
+
+
+      75 |
+      76 |   test('ctrl n/p changes selected item', async ({ page }) => {
+    > 77 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+         |                                                                     ^
+      78 |     await page.locator(`[cmdk-input]`).press('Control+n')
+      79 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'a')
+      80 |     await page.locator(`[cmdk-input]`).press('Control+p')
+
+    [2m    at <candidate-workspace>/test/keybind.test.ts:77:69[22m
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/keybind-vim-np-keybinds-ctrl-n-p-changes-selected-item-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  11) [chrome] › keybind.test.ts:84:3 › vim np keybinds › meta ctrl n/p goes to first and last item [39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected string: [32m"first"[39m
+    Received string: [31m""[39m
+    Call log:
+      [2m- expect.toHaveAttribute with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-item][aria-selected="true"]"[22m
+
+
+      83 |
+      84 |   test('meta ctrl n/p goes to first and last item', async ({ page }) => {
+    > 85 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+         |                                                                     ^
+      86 |     await page.locator(`[cmdk-input]`).press('Meta+Control+n')
+      87 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'last')
+      88 |     await page.locator(`[cmdk-input]`).press('Meta+Control+p')
+
+    [2m    at <candidate-workspace>/test/keybind.test.ts:85:69[22m
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/keybind-vim-np-keybinds-meta-ctrl-n-p-goes-to-first-and-last-item-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[31m  12) [chrome] › keybind.test.ts:92:3 › vim np keybinds › alt ctrl n/p goes to next and prev item [90m==[31m[39m
+
+    [31mTest timeout of 5000ms exceeded.[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected string: [32m"first"[39m
+    Received string: [31m""[39m
+    Call log:
+      [2m- expect.toHaveAttribute with timeout 5000ms[22m
+    [2m  - waiting for selector "[cmdk-item][aria-selected="true"]"[22m
+
+
+      91 |
+      92 |   test('alt ctrl n/p goes to next and prev item', async ({ page }) => {
+    > 93 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'first')
+         |                                                                     ^
+      94 |     await page.locator(`[cmdk-input]`).press('Alt+Control+n')
+      95 |     await expect(page.locator(`[cmdk-item][aria-selected="true"]`)).toHaveAttribute('data-value', 'a')
+      96 |     await page.locator(`[cmdk-input]`).press('Alt+Control+n')
+
+    [2m    at <candidate-workspace>/test/keybind.test.ts:93:69[22m
+
+    Pending operations:
+      - expect.toHaveAttribute at node_modules/.pnpm/@playwright+test@1.24.1/node_modules/@playwright/test/lib/util.js:97:56
+
+
+[36m    attachment #1: screenshot (image/png) [90m----------------------------------------------------------[36m[39m
+[36m    ../evidence/baseline/keybind-vim-np-keybinds-alt-ctrl-n-p-goes-to-next-and-prev-item-chrome/test-failed-1.png[39m
+[36m    [90m------------------------------------------------------------------------------------------------[36m[39m
+
+[33m  Slow test file: [39m[chrome] › keybind.test.ts[33m (45s)[39m
+[33m  Slow test file: [39m[chrome] › dynamic-groups.test.ts[33m (15s)[39m
+[33m  Consider splitting slow test files to speed up parallel execution[39m
+
+[31m  12 failed[39m
+[31m    [chrome] › dynamic-groups.test.ts:7:1 › initial search ranks groups by their best matching item [39m
+[31m    [chrome] › dynamic-groups.test.ts:13:1 › removing an item before searching does not corrupt later group ranking [39m
+[31m    [chrome] › dynamic-groups.test.ts:21:1 › active search updates group order and selection when items are removed and restored [39m
+[31m    [chrome] › keybind.test.ts:8:3 › arrow keybinds › arrow up/down changes selected item [90m==========[31m[39m
+[31m    [chrome] › keybind.test.ts:16:3 › arrow keybinds › meta arrow up/down goes to first and last item [39m
+[31m    [chrome] › keybind.test.ts:24:3 › arrow keybinds › alt arrow up/down goes to next and prev item [39m
+[31m    [chrome] › keybind.test.ts:42:3 › vim jk keybinds › ctrl j/k changes selected item [90m=============[31m[39m
+[31m    [chrome] › keybind.test.ts:50:3 › vim jk keybinds › meta ctrl j/k goes to first and last item [90m==[31m[39m
+[31m    [chrome] › keybind.test.ts:58:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item [90m====[31m[39m
+[31m    [chrome] › keybind.test.ts:76:3 › vim np keybinds › ctrl n/p changes selected item [90m=============[31m[39m
+[31m    [chrome] › keybind.test.ts:84:3 › vim np keybinds › meta ctrl n/p goes to first and last item [90m==[31m[39m
+[31m    [chrome] › keybind.test.ts:92:3 › vim np keybinds › alt ctrl n/p goes to next and prev item [90m====[31m[39m

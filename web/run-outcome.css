@@ -1,0 +1,11 @@
+.run-outcome {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--panel-sunken);
+}
+.run-outcome-error { border-left-color: var(--crimson); }
+.run-outcome h2 { margin: 0 0 8px; font-size: 16px; line-height: 1.5; }
+.run-outcome p { margin: 0 0 14px; color: var(--text-secondary); font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-outcome .ghost-btn { font-size: 14px; }

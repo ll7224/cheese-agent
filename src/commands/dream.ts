@@ -28,12 +28,14 @@ export const dreamCommands: CommandHandler[] = [
     const currentSystem = ctx.builder.build(ctx.makePromptCtx());
     const beforeLen = ctx.messages.length;
 
-    agentLoop(ctx.model, ctx.registry, ctx.messages, currentSystem, ctx.tracker).then(() => {
+    agentLoop(ctx.model, ctx.registry, ctx.messages, currentSystem, ctx.tracker, ctx.executionOptions)
+      .then(() => { console.log(`  [dream 完成]\n`); })
+      .catch(error => { console.error(`\n${error instanceof Error ? error.message : String(error)}`); })
+      .finally(() => {
       const newMessages = ctx.messages.slice(beforeLen);
       const now = Date.now();
       for (let i = beforeLen; i < ctx.messages.length; i++) ctx.timestamps.set(i, now);
       ctx.sessionStore.appendAll(newMessages);
-      console.log(`  [dream 完成]\n`);
       ctx.ask();
     });
 

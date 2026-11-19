@@ -1,0 +1,18 @@
+
+Running 9 tests using 1 worker
+
+[WebServer] Browserslist: caniuse-lite is outdated. Please run:
+  npx browserslist@latest --update-db
+  Why you should do it regularly: https://github.com/browserslist/browserslist#browsers-data-updating
+  ✓  [chrome] › keybind.test.ts:8:3 › arrow keybinds › arrow up/down changes selected item (945ms)
+  ✓  [chrome] › keybind.test.ts:16:3 › arrow keybinds › meta arrow up/down goes to first and last item (463ms)
+  ✓  [chrome] › keybind.test.ts:24:3 › arrow keybinds › alt arrow up/down goes to next and prev item (425ms)
+  ✓  [chrome] › keybind.test.ts:42:3 › vim jk keybinds › ctrl j/k changes selected item (450ms)
+  ✓  [chrome] › keybind.test.ts:50:3 › vim jk keybinds › meta ctrl j/k goes to first and last item (408ms)
+  ✓  [chrome] › keybind.test.ts:58:3 › vim jk keybinds › alt ctrl j/k goes to next and prev item (458ms)
+  ✓  [chrome] › keybind.test.ts:76:3 › vim np keybinds › ctrl n/p changes selected item (422ms)
+  ✓  [chrome] › keybind.test.ts:84:3 › vim np keybinds › meta ctrl n/p goes to first and last item (453ms)
+  ✓  [chrome] › keybind.test.ts:92:3 › vim np keybinds › alt ctrl n/p goes to next and prev item (421ms)
+
+
+  9 passed (7s)

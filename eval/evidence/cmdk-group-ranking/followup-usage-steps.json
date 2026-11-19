@@ -1,0 +1,209 @@
+[
+  {
+    "step": 1,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 3267,
+      "output": 55,
+      "total": 3322
+    }
+  },
+  {
+    "step": 2,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 4119,
+      "output": 627,
+      "total": 4746
+    }
+  },
+  {
+    "step": 3,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 5368,
+      "output": 63,
+      "total": 5431
+    }
+  },
+  {
+    "step": 4,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 5445,
+      "output": 72,
+      "total": 5517
+    }
+  },
+  {
+    "step": 5,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 6432,
+      "output": 60,
+      "total": 6492
+    }
+  },
+  {
+    "step": 6,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 14220,
+      "output": 50,
+      "total": 14270
+    }
+  },
+  {
+    "step": 7,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 14385,
+      "output": 41,
+      "total": 14426
+    }
+  },
+  {
+    "step": 8,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 14545,
+      "output": 49,
+      "total": 14594
+    }
+  },
+  {
+    "step": 9,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 14624,
+      "output": 37,
+      "total": 14661
+    }
+  },
+  {
+    "step": 10,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 14848,
+      "output": 1047,
+      "total": 15895
+    }
+  },
+  {
+    "step": 11,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 16051,
+      "output": 52,
+      "total": 16103
+    }
+  },
+  {
+    "step": 12,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 16410,
+      "output": 38,
+      "total": 16448
+    }
+  },
+  {
+    "step": 13,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 17025,
+      "output": 3141,
+      "total": 20166
+    }
+  },
+  {
+    "step": 14,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 20194,
+      "output": 321,
+      "total": 20515
+    }
+  },
+  {
+    "step": 15,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 20822,
+      "output": 4738,
+      "total": 25560
+    }
+  },
+  {
+    "step": 16,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 25878,
+      "output": 10252,
+      "total": 36130
+    }
+  },
+  {
+    "step": 17,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 36165,
+      "output": 141,
+      "total": 36306
+    }
+  },
+  {
+    "step": 18,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 36342,
+      "output": 359,
+      "total": 36701
+    }
+  },
+  {
+    "step": 19,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 36738,
+      "output": 525,
+      "total": 37263
+    }
+  },
+  {
+    "step": 20,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 37300,
+      "output": 144,
+      "total": 37444
+    }
+  },
+  {
+    "step": 21,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 37479,
+      "output": 55,
+      "total": 37534
+    }
+  },
+  {
+    "step": 22,
+    "finishReason": "tool-calls",
+    "usage": {
+      "input": 37635,
+      "output": 584,
+      "total": 38219
+    }
+  },
+  {
+    "step": 23,
+    "finishReason": "stop",
+    "usage": {
+      "input": 39503,
+      "output": 1687,
+      "total": 41190
+    }
+  }
+]

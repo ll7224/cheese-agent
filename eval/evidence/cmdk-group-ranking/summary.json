@@ -1,0 +1,28 @@
+{
+  "taskId": "cmdk-group-ranking",
+  "date": "2026-10-17",
+  "stage": "Second development case calibration (pre-run snapshot)",
+  "laterCandidateResult": "candidate-result.json",
+  "sourceRevision": "9fae175d9bc993d0f72275388429ac0825a72108",
+  "origin": "Existing source defect with locally constructed deterministic fixture and assertions",
+  "environment": { "node": "16.20.2", "pnpm": "7.9.0", "playwright": "1.24.1", "browser": "installed Chrome", "port": 43818 },
+  "agentWorkspaceSource": "All original archive files match; fixture only adds a page and test file. No library fix applied.",
+  "baseline": {
+    "buildPassed": true,
+    "mainBatch": { "passed": 10, "failed": 3, "exitCode": 1, "log": "baseline.txt" },
+    "additionalGroupRegression": { "passed": 2, "failed": 0, "exitCode": 0, "log": "baseline-groups.txt" },
+    "distinctTests": { "passed": 12, "failed": 3 }
+  },
+  "reference": {
+    "buildPassed": true,
+    "passed": 15, "failed": 0, "exitCode": 0, "log": "reference.txt"
+  },
+  "calibrationHistory": [
+    "Copied pnpm shims initially retained absolute NODE_PATH into the first workspace, causing duplicate React and 12 environment failures. Offline frozen-lockfile install corrected the new workspace; original workspace was preserved.",
+    "After environment correction, the first 12-assertion suite had 10 passes and 2 dynamic-order failures.",
+    "Initial reference cleanup alone still had 10 passes and 2 failures. Source inspection identified group lookup comparing internal IDs to public values; a static search-order assertion was added.",
+    "Final frozen baseline main batch had 10 passes and 3 failures; original group regression was added and its 2 checks passed separately. Final reference ran the complete 15 checks once and passed."
+  ],
+  "modelRequestsDuringPreparation": 0,
+  "expectedAgentResult": "Build success, fixed judge 15/15, minimal library-only patch and final conversational delivery"
+}

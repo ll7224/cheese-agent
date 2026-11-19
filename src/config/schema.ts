@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_TOKEN_BUDGET } from '../agent/limits.js';
 
 export const ModelConfigSchema = z.object({
   provider: z.enum(['dashscope', 'openai', 'google', 'gemini', 'custom']).or(z.string()).default('dashscope'),
@@ -71,6 +72,10 @@ export const UsageConfigSchema = z.object({
   trackingFile: z.string().default('.usage/today.jsonl'),
 });
 
+export const ExecutionConfigSchema = z.object({
+  tokenBudget: z.number().int().positive().default(DEFAULT_TOKEN_BUDGET),
+});
+
 export const CheeseAgentConfigSchema = z.object({
   version: z.string().default('1.0'),
   model: ModelConfigSchema.default({
@@ -119,6 +124,7 @@ export const CheeseAgentConfigSchema = z.object({
   usage: UsageConfigSchema.default({
     trackingFile: '.usage/today.jsonl',
   }),
+  execution: ExecutionConfigSchema.default({ tokenBudget: DEFAULT_TOKEN_BUDGET }),
 });
 
 export type CheeseAgentConfig = z.infer<typeof CheeseAgentConfigSchema>;

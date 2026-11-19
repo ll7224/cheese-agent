@@ -37,7 +37,7 @@ export async function spawnAgent(request: SpawnRequest, ctx: SpawnContext, index
     emit({ type: 'child-status', status: 'running', task: request.task });
     timer = setTimeout(() => timeout.abort(), request.timeout || ctx.agentRegistry.getConfig().defaultTimeout);
     const registry = ctx.registry.fork(new Set(['spawn_agent']), request.tools);
-    await agentLoop(ctx.model, registry, messages, `${ctx.buildSystem()}\n你是子 Agent。完成指定任务后直接输出结论。`, undefined, { emit, signal });
+    await agentLoop(ctx.model, registry, messages, `${ctx.buildSystem()}\n你是子 Agent。完成指定任务后直接输出结论。`, undefined, { emit, signal, tokenBudget: ctx.tokenBudget });
     signal.throwIfAborted();
     const last = [...messages].reverse().find(message => message.role === 'assistant');
     const result = typeof last?.content === 'string' ? last.content : (last?.content as any[] || []).filter(part => part.type === 'text').map(part => part.text).join('');
